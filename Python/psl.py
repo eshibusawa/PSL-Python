@@ -45,6 +45,9 @@ class plane_sweep():
         self.match_window_width = 7
         self.match_window_height = 7
         self.num_planes = 256
+        self.near_y = 0.4
+        self.far_y = 1.5
+        self.num_ground = 16
         self.plane_generation_mode_ = {'uniform_depth':0, 'uniform_disparity':1}
         self.plane_generation_mode = self.plane_generation_mode_['uniform_disparity']
         self.matching_costs_ = {'sad':0, 'zncc':1}
@@ -53,6 +56,8 @@ class plane_sweep():
         self.sub_pixel_interpolation_mode = self.sub_pixel_interpolation_mode_['inverse']
         self.sub_pixel_enabled = True
         self.box_filer_ad_enabled = True
+        self.write_debug_warping_enabled = False
+        self.ground_plane_enabled = False
         self.imgs = list()
         self.cams = list()
         self.Rs = list()
@@ -60,18 +65,39 @@ class plane_sweep():
         self.CV = None
         self.rays = None
 
-    def generate_planes(self):
-        self.planes = np.empty((4, self.num_planes), dtype=np.float)
-        self.planes[0:2, :] = 0
-        self.planes[2, :] = -1
-        if self.plane_generation_mode == 1:
-            minD = 1/self.far_z
-            maxD = 1/self.near_z
-            dstep = (maxD - minD)/(self.num_planes - 1)
-            self.planes[3, :] = 1 / (np.arange(maxD, minD - dstep, -dstep))
+    @staticmethod
+    def generate_depth(near, far, num, mode):
+        if mode == 1:
+            minD = 1/far
+            maxD = 1/near
+            dstep = (maxD - minD)/(num - 1)
+            depth = 1 / (np.arange(maxD, minD - dstep, -dstep))
         else:
-            step = (self.far_z - self.near_z)/(self.num_planes - 1)
-            self.planes[3, :] = np.arange(self.near_z, self.far_z + step, step)
+            step = (far - near)/(num - 1)
+            depth  = np.arange(near, far + step, step)
+        return np.flip(depth)
+
+    def generate_planes(self):
+        # front parallel
+        fp_planes = np.empty((4, self.num_planes), dtype=np.float)
+        fp_planes[0:2, :] = 0
+        fp_planes[2, :] = -1
+        fp_planes_has_neighbor = np.full(self.num_planes, True, dtype=np.bool)
+        fp_planes_has_neighbor[0] = fp_planes_has_neighbor[-1] = False
+        fp_planes[3, :] = plane_sweep.generate_depth(self.near_z, self.far_z, self.num_planes, self.plane_generation_mode)
+        self.planes = fp_planes
+        self.planes_has_neighbor = fp_planes_has_neighbor
+
+        # ground
+        if self.ground_plane_enabled:
+            g_planes = np.empty((4, self.num_ground), dtype=np.float)
+            g_planes[0:2, :] = 0
+            g_planes[1, :] = -1
+            g_planes[3, :] = plane_sweep.generate_depth(self.near_y, self.far_y, self.num_ground, self.plane_generation_mode)
+            g_planes_has_neighbor = np.full(self.num_ground, True, dtype=np.bool)
+            g_planes_has_neighbor[0] = g_planes_has_neighbor[-1] = False
+            self.planes = np.hstack((self.planes, g_planes))
+            self.planes_has_neighbor = np.hstack((self.planes_has_neighbor, g_planes_has_neighbor))
 
     def transform_planes(self, R, t):
         self.Hs = np.empty((self.planes.shape[1], 3, 3), dtype=self.planes.dtype)
@@ -123,6 +149,9 @@ class plane_sweep():
                     mask = mask.reshape(sz_img)
                     self.mask[:,:,l] = mask
 
+                if self.write_debug_warping_enabled:
+                    cv2.imwrite('debug_warping_{:04d}_{:04d}.png'.format(k, l), warp)
+
         self.CV = cost_function.get_cost_volume()
         self.rays = rays
 
@@ -139,12 +168,11 @@ class plane_sweep():
         plane_dot = xy[0] * self.planes[0, indices_0] + xy[1] * self.planes[1, indices_0] + self.planes[2, indices_0]
 
         if self.sub_pixel_enabled:
-            indices_mask = (indices != 0)
-            indices_mask &= (indices != self.CV.shape[2] - 1)
+            indices_mask = self.planes_has_neighbor[indices]
             indices_m = np.copy(indices)
-            indices_m[indices_mask] -= 1
+            indices_m[indices_mask] += 1
             indices_p = np.copy(indices)
-            indices_p[indices_mask] += 1
+            indices_p[indices_mask] -= 1
             cost_0 = np.take_along_axis(self.CV, indices[:,:,np.newaxis], 2).reshape(-1)
             cost_p = np.take_along_axis(self.CV, indices_p[:,:,np.newaxis], 2).reshape(-1)
             cost_m = np.take_along_axis(self.CV, indices_m[:,:,np.newaxis], 2).reshape(-1)
@@ -178,12 +206,7 @@ class plane_sweep():
     def get_depth(self):
         if self.CV is None:
             return None
-        if False:
-            best_plane_indices = np.argmin(self.CV, axis=2)
-        else:
-            fliped_indices = np.flip(np.arange(0, self.CV.shape[2], 1), axis=0)
-            # select far depth in the case of same cost value
-            best_plane_indices = fliped_indices[np.argmin(np.flip(self.CV, axis=2), axis=2)]
+        best_plane_indices = np.argmin(self.CV, axis=2)
 
         D = self.get_depth_from_planes(best_plane_indices)
         return D
