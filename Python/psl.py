@@ -58,10 +58,8 @@ class plane_sweep():
         self.box_filer_ad_enabled = True
         self.write_debug_warping_enabled = False
         self.ground_plane_enabled = False
-        self.imgs = list()
-        self.cams = list()
-        self.Rs = list()
-        self.Ts = list()
+        self.use_gpu = False
+        self.clear_images()
         self.CV = None
         self.rays = None
 
@@ -79,8 +77,7 @@ class plane_sweep():
 
     def generate_planes(self):
         # front parallel
-        fp_planes = np.empty((4, self.num_planes), dtype=np.float)
-        fp_planes[0:2, :] = 0
+        fp_planes = np.zeros((4, self.num_planes), dtype=np.float)
         fp_planes[2, :] = -1
         fp_planes_has_neighbor = np.full(self.num_planes, True, dtype=np.bool)
         fp_planes_has_neighbor[0] = fp_planes_has_neighbor[-1] = False
@@ -90,8 +87,7 @@ class plane_sweep():
 
         # ground
         if self.ground_plane_enabled:
-            g_planes = np.empty((4, self.num_ground), dtype=np.float)
-            g_planes[0:2, :] = 0
+            g_planes = np.zeros((4, self.num_ground), dtype=np.float)
             g_planes[1, :] = -1
             g_planes[3, :] = plane_sweep.generate_depth(self.near_y, self.far_y, self.num_ground, self.plane_generation_mode)
             g_planes_has_neighbor = np.full(self.num_ground, True, dtype=np.bool)
@@ -112,6 +108,12 @@ class plane_sweep():
         self.Rs.append(R)
         self.Ts.append(t)
         self.imgs.append(img)
+
+    def clear_images(self):
+        self.imgs = list()
+        self.cams = list()
+        self.Rs = list()
+        self.Ts = list()
 
     def get_cost_volume(self, ref):
         self.generate_planes()
@@ -203,10 +205,77 @@ class plane_sweep():
         D = D.reshape(indices.shape)
         return D
 
-    def get_depth(self):
-        if self.CV is None:
-            return None
-        best_plane_indices = np.argmin(self.CV, axis=2)
+    def get_depth(self, ref = 0):
+        try:
+            import torch
+            import psl_cuda as py_psl_cuda
+            import kornia.filters
+        except ImportError:
+            self.use_gpu = False
 
-        D = self.get_depth_from_planes(best_plane_indices)
+        if not self.use_gpu:
+            if self.CV is None:
+                self.get_cost_volume(ref)
+            best_plane_indices = np.argmin(self.CV, axis=2)
+            D = self.get_depth_from_planes(best_plane_indices)
+        else:
+            D = self.get_depth_gpu(ref)
+
+        return D
+
+    def get_depth_gpu(self, ref = 0):
+        if self.matching_costs != 0:
+            raise ValueError("Only SAD is supported!")
+        if self.sub_pixel_enabled:
+            raise ValueError("Subpixel estimation is not supported!")
+
+        try:
+            import torch
+            import psl_cuda as py_psl_cuda
+            import kornia.filters
+        except ImportError:
+            return None
+
+        self.generate_planes()
+
+        # upload tensor
+        Ks = [C.K for C in self.cams]
+        xis = [C.xi for C in self.cams]
+        t_imgs = torch.tensor(np.array(self.imgs), device=torch.device('cuda'))
+        t_Ks = torch.tensor(np.array(Ks), dtype=torch.float32, device=torch.device('cuda'))
+        t_xis = torch.tensor(np.array(xis), dtype=torch.float32, device=torch.device('cuda'))
+        t_Rs = torch.tensor(np.array(self.Rs), dtype=torch.float32, device=torch.device('cuda'))
+        t_Ts = torch.tensor(np.array(self.Ts), dtype=torch.float32, device=torch.device('cuda'))
+        t_Ps = torch.tensor(self.planes.T, dtype=torch.float32, device=torch.device('cuda'))
+
+        # compute warped images
+        warped_images_gpu, rays_gpu = py_psl_cuda.get_warped_image_tensor(ref, t_imgs, t_Ks, t_xis, t_Rs, t_Ts, t_Ps)
+        if self.write_debug_warping_enabled:
+            warped_images = warped_images_gpu.to('cpu').numpy()
+            for k in range(0, warped_images.shape[0]):
+                for l in range(0, self.planes.shape[1]):
+                    cv2.imwrite('debug_warping_{:04d}_{:04d}.png'.format(k, l), warped_images[k, l].astype(np.uint8))
+        ad_gpu = torch.abs(warped_images_gpu - t_imgs[ref])
+        del warped_images_gpu
+        torch.cuda.empty_cache()
+
+        # sad
+        ad0 = ad_gpu[0].view(1, *ad_gpu.shape[1:])
+        box_filer_size = (self.match_window_width, self.match_window_height)
+        sad = kornia.filters.box_blur(ad0, box_filer_size, border_type='replicate', normalized=False)
+        for k in range(1, ad_gpu.shape[0]):
+            adk = ad_gpu[k].view(1, *ad_gpu.shape[1:])
+            sad += kornia.filters.box_blur(adk, box_filer_size, border_type='replicate', normalized=False)
+        del ad_gpu, adk
+        torch.cuda.empty_cache()
+
+        sad = sad.view(*sad.shape[1:])
+        indices = torch.argmin(sad, dim=0)
+        self.rays = rays_gpu.to('cpu').numpy().transpose(2, 0, 1).reshape(3, -1)
+        D = self.get_depth_from_planes(indices.to('cpu').numpy())
+
+        del sad, rays_gpu, indices
+        del t_imgs, t_Ks, t_xis, t_Rs, t_Ts, t_Ps
+        torch.cuda.empty_cache()
+
         return D
