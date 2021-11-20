@@ -237,6 +237,7 @@ class plane_sweep():
             return None
 
         self.generate_planes()
+        n_imgs = len(self.imgs)
 
         # upload tensor
         Ks = [C.K for C in self.cams]
@@ -252,24 +253,19 @@ class plane_sweep():
         warped_images_gpu, rays_gpu = py_psl_cuda.get_warped_image_tensor(ref, t_imgs, t_Ks, t_xis, t_Rs, t_Ts, t_Ps)
         if self.write_debug_warping_enabled:
             warped_images = warped_images_gpu.to('cpu').numpy()
-            for k in range(0, warped_images.shape[0]):
+            for k in range(0, n_imgs - 1):
                 for l in range(0, self.planes.shape[1]):
-                    cv2.imwrite('debug_warping_{:04d}_{:04d}.png'.format(k, l), warped_images[k, l].astype(np.uint8))
-        ad_gpu = torch.abs(warped_images_gpu - t_imgs[ref])
+                    cv2.imwrite('debug_warping_{:04d}_{:04d}.png'.format(k, l), warped_images[k, l])
+        ad_gpu = torch.abs(t_imgs[ref].to(torch.float16) - warped_images_gpu)
         del warped_images_gpu
         torch.cuda.empty_cache()
 
         # sad
-        ad0 = ad_gpu[0].view(1, *ad_gpu.shape[1:])
         box_filer_size = (self.match_window_width, self.match_window_height)
-        sad = kornia.filters.box_blur(ad0, box_filer_size, border_type='replicate', normalized=False)
-        for k in range(1, ad_gpu.shape[0]):
-            adk = ad_gpu[k].view(1, *ad_gpu.shape[1:])
-            sad += kornia.filters.box_blur(adk, box_filer_size, border_type='replicate', normalized=False)
-        del ad_gpu, adk
+        sad = torch.mean(kornia.filters.box_blur(ad_gpu, box_filer_size, border_type='replicate', normalized=False), dim=0)
+        del ad_gpu
         torch.cuda.empty_cache()
 
-        sad = sad.view(*sad.shape[1:])
         indices = torch.argmin(sad, dim=0)
         self.rays = rays_gpu.to('cpu').numpy().transpose(2, 0, 1).reshape(3, -1)
         D = self.get_depth_from_planes(indices.to('cpu').numpy())

@@ -53,7 +53,7 @@ __global__ void getRaysCUDAKernel(
 }
 
 __global__ void getWarpedImageTensorCUDAKernel(
-	float* __restrict__ output,
+	unsigned char* __restrict__ output,
 	cudaTextureObject_t tex,
 	const float* __restrict__ K_ref,
 	const float* __restrict__ K_other,
@@ -92,7 +92,7 @@ __global__ void getWarpedImageTensorCUDAKernel(
 
 	const int wh = width * height;
 	const int indexOutput = indexX + indexY * width + indexP * wh;
-	output[indexOutput] =  255 * tex2D<float>(tex, uvo.x / width, uvo.y / height);
+	output[indexOutput] =  static_cast<unsigned char>(255 * __saturatef(tex2D<float>(tex, uvo.x / width, uvo.y / height)));
 }
 
 std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor images, torch::Tensor Ks, torch::Tensor xis, torch::Tensor Rs, torch::Tensor Ts, torch::Tensor Ps)
@@ -102,7 +102,7 @@ std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor image
 	const int width = images.size(2), height = images.size(1);
 	auto WarpedImagesOptions =
 	torch::TensorOptions()
-		.dtype(torch::kFloat)
+		.dtype(torch::kByte)
 		.device(torch::kCUDA, 0);
 	auto warpedImages = torch::empty({nImages - 1, nPlanes, height, width}, WarpedImagesOptions);
 
@@ -145,7 +145,7 @@ std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor image
 		const float *p_xi_other = xis.data_ptr<float>() + k;
 		TextureObjectCreator<unsigned char> toc(p_images + k * width * height, width, height);
 		cudaTextureObject_t tex = toc.getTextureObject();
-		float *p_warpedImages = warpedImages.data_ptr<float>() + (l * width * height * nPlanes);
+		unsigned char *p_warpedImages = warpedImages.data_ptr<unsigned char>() + (l * width * height * nPlanes);
 		// manual dispatch
 		getWarpedImageTensorCUDAKernel<<<blocks, threads>>>(
 				p_warpedImages,
