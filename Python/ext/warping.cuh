@@ -35,7 +35,7 @@ inline __device__ float3 apply3x3Transformation(const float A[3][3], float3 x)
 	);
 }
 
-inline __device__ void getRelativeRotation(const float *R_ref, const float *R_other, float R[3][3])
+inline __host__ void getRelativeRotation(const float *R_ref, const float *R_other, float R[3][3])
 {
 	R[0][0] = R_other[0] * R_ref[0] + R_other[1] * R_ref[1] + R_other[2] * R_ref[2];
 	R[0][1] = R_other[0] * R_ref[3] + R_other[1] * R_ref[4] + R_other[2] * R_ref[5];
@@ -48,7 +48,7 @@ inline __device__ void getRelativeRotation(const float *R_ref, const float *R_ot
 	R[2][2] = R_other[6] * R_ref[6] + R_other[7] * R_ref[7] + R_other[8] * R_ref[8];
 }
 
-inline __device__ float3 getRelativeTranslation(const float *T_ref, const float *T_other, float R[3][3])
+inline __host__ float3 getRelativeTranslation(const float *T_ref, const float *T_other, float R[3][3])
 {
 	return make_float3(
 		R[0][0] * T_ref[0] + R[0][1] * T_ref[1] + R[0][2] * T_ref[2] - T_other[0],

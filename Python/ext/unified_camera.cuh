@@ -31,7 +31,7 @@ struct Intrinsics
 	float xi;
 };
 
-inline __device__ Intrinsics getIntrinsics(const float *K, float xi)
+inline __host__ Intrinsics getIntrinsics(const float *K, float xi)
 {
 	Intrinsics ret;
 	ret.fufv = make_float2(K[0], K[4]);

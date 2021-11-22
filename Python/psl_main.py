@@ -31,6 +31,7 @@ from unified_camera import unified_camera as ucm
 if __name__ == '__main__':
     psl_path = '/path/to/PSL'
     ds_path = psl_path + '/data/fisheyeCamera/left/'
+    use_gpu = True
 
     psld = psl_data(ds_path)
     K, R, C, xi, ks, ps = psld.read_calibration()
@@ -50,13 +51,18 @@ if __name__ == '__main__':
 
     pyps = py_psl.plane_sweep()
     pyps.num_planes = 256
-    pyps.sub_pixel_enabled = True
-    pyps.matching_costs = pyps.matching_costs_['zncc']
+    if use_gpu:
+        pyps.use_gpu = True
+        pyps.sub_pixel_enabled = False
+        pyps.matching_costs = pyps.matching_costs_['sad']
+    else:
+        pyps.use_gpu = False
+        pyps.sub_pixel_enabled = True
+        pyps.matching_costs = pyps.matching_costs_['zncc']
 
     for k in range(0, len(imgs)):
         pyps.add_image(uc_new, Rs[k], Ts[k], imgs[k])
 
-    pyps.get_cost_volume(0)
-    D = pyps.get_depth()
+    D = pyps.get_depth(0)
     Dimg = py_psl.depth_to_colormap(D, pyps.near_z, pyps.far_z)
     cv2.imwrite('depth.png', Dimg)

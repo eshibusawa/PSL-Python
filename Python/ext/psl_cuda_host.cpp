@@ -33,15 +33,18 @@ std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor image
 
 // C++ interface
 #define CHECK_CUDA(x) TORCH_CHECK(x.type().is_cuda(), #x " must be a CUDA tensor")
+#define CHECK_CPU(x) TORCH_CHECK(!x.type().is_cuda(), #x " must be a CPU tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
+#define CHECK_INPUT_CPU(x) CHECK_CPU(x); CHECK_CONTIGUOUS(x)
 
 std::vector<torch::Tensor> getWarpedImageTensor(int ref, torch::Tensor images, torch::Tensor Ks, torch::Tensor xis, torch::Tensor Rs, torch::Tensor Ts, torch::Tensor Ps)
 {
 	CHECK_INPUT(images);
-	CHECK_INPUT(Ks);
-	CHECK_INPUT(Rs);
-	CHECK_INPUT(Ts);
+	CHECK_INPUT_CPU(Ks);
+	CHECK_INPUT_CPU(xis);
+	CHECK_INPUT_CPU(Rs);
+	CHECK_INPUT_CPU(Ts);
 	CHECK_INPUT(Ps);
 
 	if ((images.sizes().size() != 3) || (images.scalar_type() != torch::kByte) ||

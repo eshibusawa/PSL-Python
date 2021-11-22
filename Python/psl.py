@@ -73,7 +73,7 @@ class plane_sweep():
         else:
             step = (far - near)/(num - 1)
             depth  = np.arange(near, far + step, step)
-        return np.flip(depth)
+        return np.flip(depth)[:num]
 
     def generate_planes(self):
         # front parallel
@@ -243,10 +243,10 @@ class plane_sweep():
         Ks = [C.K for C in self.cams]
         xis = [C.xi for C in self.cams]
         t_imgs = torch.tensor(np.array(self.imgs), device=torch.device('cuda'))
-        t_Ks = torch.tensor(np.array(Ks), dtype=torch.float32, device=torch.device('cuda'))
-        t_xis = torch.tensor(np.array(xis), dtype=torch.float32, device=torch.device('cuda'))
-        t_Rs = torch.tensor(np.array(self.Rs), dtype=torch.float32, device=torch.device('cuda'))
-        t_Ts = torch.tensor(np.array(self.Ts), dtype=torch.float32, device=torch.device('cuda'))
+        t_Ks = torch.tensor(np.array(Ks), dtype=torch.float32, device=torch.device('cpu'))
+        t_xis = torch.tensor(np.array(xis), dtype=torch.float32, device=torch.device('cpu'))
+        t_Rs = torch.tensor(np.array(self.Rs), dtype=torch.float32, device=torch.device('cpu'))
+        t_Ts = torch.tensor(np.array(self.Ts), dtype=torch.float32, device=torch.device('cpu'))
         t_Ps = torch.tensor(self.planes.T, dtype=torch.float32, device=torch.device('cuda'))
 
         # compute warped images

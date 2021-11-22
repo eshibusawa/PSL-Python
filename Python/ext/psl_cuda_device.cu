@@ -33,8 +33,7 @@
 
 __global__ void getRaysCUDAKernel(
 	float3* __restrict__ output,
-	const float* __restrict__ K_ref,
-	const float* __restrict__ xi_ref,
+	Intrinsics kr,
 	int height,
 	int width)
 {
@@ -46,23 +45,23 @@ __global__ void getRaysCUDAKernel(
 		return;
 	}
 
-	Intrinsics kr = getIntrinsics(K_ref, *xi_ref);
 	const int indexOutput = indexX + indexY * width;
 	float3 xyz = unproject(make_float2(indexX, indexY), kr);
 	output[indexOutput] =  xyz;
 }
 
+#define BLOCK_SIZE_RAYS 128
+#define BLOCK_SIZE_PLANES 8
+
 __global__ void getWarpedImageTensorCUDAKernel(
 	unsigned char* __restrict__ output,
 	cudaTextureObject_t tex,
-	const float* __restrict__ K_ref,
-	const float* __restrict__ K_other,
-	const float* __restrict__ R_ref,
-	const float* __restrict__ R_other,
-	const float* __restrict__ T_ref,
-	const float* __restrict__ T_other,
-	const float* __restrict__ xi_ref,
-	const float* __restrict__ xi_other,
+	const float3* __restrict__ rays,
+	Intrinsics ko,
+	float3 r1,
+	float3 r2,
+	float3 r3,
+	float3 t,
 	const float* __restrict__ P,
 	int nPlanes,
 	int height,
@@ -77,22 +76,42 @@ __global__ void getWarpedImageTensorCUDAKernel(
 		return;
 	}
 
+    __shared__ float3 rays_shared[BLOCK_SIZE_RAYS];
+    __shared__ float4 planes_shared[BLOCK_SIZE_PLANES];
+	if (threadIdx.y == 0)
+	{
+		rays_shared[threadIdx.x] = rays[indexXY];
+	}
+	if (threadIdx.x == 0)
+	{
+		planes_shared[threadIdx.y].x = P[4 * indexP];
+		planes_shared[threadIdx.y].y = P[4 * indexP + 1];
+		planes_shared[threadIdx.y].z = P[4 * indexP + 2];
+		planes_shared[threadIdx.y].w = P[4 * indexP + 3];
+	}
+	__syncthreads();
+
 	// coordinate transform
-	Intrinsics kr = getIntrinsics(K_ref, *xi_ref);
-	Intrinsics ko = getIntrinsics(K_other, *xi_other);
+	float3 n = make_float3(planes_shared[threadIdx.y].x, planes_shared[threadIdx.y].y, planes_shared[threadIdx.y].z);
+	float d = planes_shared[threadIdx.y].w;
 	float R[3][3];
-	getRelativeRotation(R_ref, R_other, R);
-	float3 t = getRelativeTranslation(T_ref, T_other, R);
-	float3 n = make_float3(P[4 * indexP], P[4 * indexP + 1], P[4 * indexP + 2]);
-	float d = P[4 * indexP + 3];
+	R[0][0] = r1.x;
+	R[0][1] = r1.y;
+	R[0][2] = r1.z;
+	R[1][0] = r2.x;
+	R[1][1] = r2.y;
+	R[1][2] = r2.z;
+	R[2][0] = r3.x;
+	R[2][1] = r3.y;
+	R[2][2] = r3.z;
 	float H[3][3];
 	computeHMatrix(R, t, n, d, H);
-	float2 uvr = make_float2(indexX, indexY);
-	float2 uvo = unprojectHProject(kr, ko, H, uvr);
-
+	float3 Hray = apply3x3Transformation(H, rays_shared[threadIdx.x]);
+	float2 uvo = project(Hray, ko);
 	const int wh = width * height;
 	const int indexOutput = indexX + indexY * width + indexP * wh;
 	output[indexOutput] =  static_cast<unsigned char>(255 * __saturatef(tex2D<float>(tex, uvo.x / width, uvo.y / height)));
+	__syncthreads();
 }
 
 std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor images, torch::Tensor Ks, torch::Tensor xis, torch::Tensor Rs, torch::Tensor Ts, torch::Tensor Ps)
@@ -114,14 +133,14 @@ std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor image
 
 	const float *p_K_ref = Ks.data_ptr<float>() + 9 * ref;
 	const float *p_xi_ref = xis.data_ptr<float>() + ref;
+	float3 *p_rays = reinterpret_cast<float3 *>(rays.data_ptr<float>());
+	Intrinsics kr = getIntrinsics(p_K_ref, *p_xi_ref);
 	{
 		const dim3 threads(32, 32);
 		const dim3 blocks(iDivUp(width, threads.x), iDivUp(height, threads.y));
-		float3 *p_rays = reinterpret_cast<float3 *>(rays.data_ptr<float>());
 		getRaysCUDAKernel<<<blocks, threads>>>(
 				p_rays,
-				p_K_ref,
-				p_xi_ref,
+				kr,
 				height, width);
 	}
 
@@ -132,7 +151,7 @@ std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor image
 	const float *p_P = Ps.data_ptr<float>();
 	for (int k = 0; k < nImages; k++)
 	{
-		const dim3 threads(256, 4);
+		const dim3 threads(BLOCK_SIZE_RAYS, BLOCK_SIZE_PLANES);
 		const dim3 blocks(iDivUp(height * width, threads.x), iDivUp(nPlanes, threads.y));
 		if (k == ref)
 		{
@@ -147,17 +166,18 @@ std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor image
 		cudaTextureObject_t tex = toc.getTextureObject();
 		unsigned char *p_warpedImages = warpedImages.data_ptr<unsigned char>() + (l * width * height * nPlanes);
 		// manual dispatch
+		Intrinsics ko = getIntrinsics(p_K_other, *p_xi_other);
+		float R[3][3];
+		getRelativeRotation(p_R_ref, p_R_other, R);
+		float3 r1 = make_float3(R[0][0], R[0][1], R[0][2]);
+		float3 r2 = make_float3(R[1][0], R[1][1], R[1][2]);
+		float3 r3 = make_float3(R[2][0], R[2][1], R[2][2]);
+		float3 t = getRelativeTranslation(p_T_ref, p_T_other, R);
 		getWarpedImageTensorCUDAKernel<<<blocks, threads>>>(
 				p_warpedImages,
 				tex,
-				p_K_ref,
-				p_K_other,
-				p_R_ref,
-				p_R_other,
-				p_T_ref,
-				p_T_other,
-				p_xi_ref,
-				p_xi_other,
+				p_rays, ko,
+				r1, r2, r3, t,
 				p_P,
 				nPlanes, height, width);
 		l++;
