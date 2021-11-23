@@ -36,7 +36,7 @@ import add_path
 from unified_camera import unified_camera as ucm
 from psl import plane_sweep as psl
 
-class PSLCUDATestCase(TestCase):
+class UCMTestCase(TestCase):
     def setUp(self):
         self.eps = 1E-6
         self.eps_reproj = 5E-4
@@ -69,7 +69,7 @@ class PSLCUDATestCase(TestCase):
         sources = list()
         sources.append('unified_camera.cuh')
         sources.append('warping.cuh')
-        sources.append('unified_camera_unit_test.cu')
+        sources.append('project_unproject_unit_test.cu')
         sources.append('warping_unit_test.cu')
         cuda_source = None
         for fn in sources:
@@ -83,6 +83,7 @@ class PSLCUDATestCase(TestCase):
         cuda_source = cuda_source.replace("HEIGHT", str(self.sz[0]))
         cuda_source = cuda_source.replace("WIDTH", str(self.sz[1]))
         cuda_source = cuda_source.replace("NUM_PLANES", str(self.num_planes))
+        cuda_source = cuda_source.replace("CAMERA_MODEL", "UnifiedCameraModel")
         cuda_source = cuda_source.replace("__host__", "__device__")
         self.module = cp.RawModule(code=cuda_source)
 

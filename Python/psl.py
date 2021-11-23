@@ -242,14 +242,15 @@ class plane_sweep():
         n_imgs = len(self.imgs)
 
         # upload tensor
-        Ks = [C.K for C in self.cams]
-        xis = [C.xi for C in self.cams]
+        if str(self.cams[ref].__class__.__name__) == 'unified_camera':
+            # unified camera model has xi parameters
+            Ks = [np.array([C.K[0, 0], C.K[1, 1], C.K[0, 2], C.K[1, 2], C.xi])  for C in self.cams]
+            t_Ks = torch.tensor(np.array(Ks), dtype=torch.float32, device=torch.device('cpu'))
+
         t_imgs = torch.tensor(np.array(self.imgs), device=torch.device('cuda'))
-        t_Ks = torch.tensor(np.array(Ks), dtype=torch.float32, device=torch.device('cpu'))
-        t_xis = torch.tensor(np.array(xis), dtype=torch.float32, device=torch.device('cpu'))
+        t_Ps = torch.tensor(self.planes.T, dtype=torch.float32, device=torch.device('cuda'))
         t_Rs = torch.tensor(np.array(self.Rs), dtype=torch.float32, device=torch.device('cpu'))
         t_Ts = torch.tensor(np.array(self.Ts), dtype=torch.float32, device=torch.device('cpu'))
-        t_Ps = torch.tensor(self.planes.T, dtype=torch.float32, device=torch.device('cuda'))
 
         # cost function
         if self.matching_costs == 1:
@@ -260,8 +261,8 @@ class plane_sweep():
                                 self.box_filer_ad_enabled, self.matching_gpu_batch_enabled)
 
         # compute warped images
-        rays_gpu = py_psl_cuda.get_ray_tensor(ref, t_imgs, t_Ks, t_xis)
-        warped_images_gpu = py_psl_cuda.get_warped_image_tensor(ref, t_imgs, t_Ks, t_xis, t_Rs, t_Ts, rays_gpu, t_Ps)
+        rays_gpu = py_psl_cuda.get_ray_tensor(ref, t_imgs, t_Ks)
+        warped_images_gpu = py_psl_cuda.get_warped_image_tensor(ref, t_imgs, t_Ks, t_Rs, t_Ts, rays_gpu, t_Ps)
         if self.write_debug_warping_enabled:
             warped_images = warped_images_gpu.to('cpu').numpy()
             for k in range(0, n_imgs - 1):

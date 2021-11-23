@@ -25,18 +25,20 @@
 #ifndef UNIFIED_CAMERA_CUH_
 #define UNIFIED_CAMERA_CUH_
 
+namespace UnifiedCameraModel
+{
 struct Intrinsics
 {
 	float2 fufv, u0v0;
 	float xi;
 };
 
-inline __host__ Intrinsics getIntrinsics(const float *K, float xi)
+inline __host__ Intrinsics getIntrinsics(const float *K)
 {
 	Intrinsics ret;
-	ret.fufv = make_float2(K[0], K[4]);
-	ret.u0v0 = make_float2(K[2], K[5]);
-	ret.xi = xi;
+	ret.fufv = make_float2(K[0], K[1]);
+	ret.u0v0 = make_float2(K[2], K[3]);
+	ret.xi = K[4];
 	return ret;
 }
 
@@ -63,5 +65,6 @@ inline __device__ float3 unproject(const float2 x, const Intrinsics K)
 	float3 X = make_float3(F * rxy.x, F * rxy.y, F - K.xi);
 	return X;
 }
+};
 
 #endif // UNIFIED_CAMERA_CUH_

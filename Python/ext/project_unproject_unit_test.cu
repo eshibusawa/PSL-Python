@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-__constant__ Intrinsics g_K;
+__constant__ CAMERA_MODEL::Intrinsics g_K;
 
 extern "C" __global__ void unprojectTest(float3 *xyz)
 {
@@ -34,7 +34,7 @@ extern "C" __global__ void unprojectTest(float3 *xyz)
     }
 
     int index = indexX + indexY * WIDTH;
-    xyz[index] = unproject(make_float2(indexX, indexY), g_K);
+    xyz[index] = CAMERA_MODEL::unproject(make_float2(indexX, indexY), g_K);
 }
 
 extern "C" __global__ void projectTest(const float3 *xyz, float2 *xy)
@@ -47,5 +47,5 @@ extern "C" __global__ void projectTest(const float3 *xyz, float2 *xy)
     }
 
     int index = indexX + indexY * WIDTH;
-    xy[index] = project(make_float3(xyz[index].x, xyz[index].y, xyz[index].z), g_K);
+    xy[index] = CAMERA_MODEL::project(make_float3(xyz[index].x, xyz[index].y, xyz[index].z), g_K);
 }

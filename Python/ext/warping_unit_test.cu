@@ -22,32 +22,32 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-__constant__ Intrinsics g_K_ref;
-__constant__ Intrinsics g_K_other;
+__constant__ CAMERA_MODEL::Intrinsics g_K_ref;
+__constant__ CAMERA_MODEL::Intrinsics g_K_other;
 __constant__ float g_R[3][3];
 __constant__ float g_t[3];
 __constant__ float g_planes[NUM_PLANES][4];
 
 extern "C" __global__ void warpingTest(float2 *xy)
 {
-    int indexXY = blockDim.x * blockIdx.x + threadIdx.x;
-    int indexP = blockDim.y * blockIdx.y + threadIdx.y;
-    int indexX = indexXY % WIDTH;
-    int indexY = indexXY / WIDTH;
+	int indexXY = blockDim.x * blockIdx.x + threadIdx.x;
+	int indexP = blockDim.y * blockIdx.y + threadIdx.y;
+	int indexX = indexXY % WIDTH;
+	int indexY = indexXY / WIDTH;
 
-    if ((indexX >= WIDTH) || (indexY >= HEIGHT)  || (indexP >= NUM_PLANES))
-    {
-        return;
-    }
+	if ((indexX >= WIDTH) || (indexY >= HEIGHT)  || (indexP >= NUM_PLANES))
+	{
+		return;
+	}
 
-    int index = indexX + indexY * WIDTH + (WIDTH * HEIGHT * indexP);
+	int index = indexX + indexY * WIDTH + (WIDTH * HEIGHT * indexP);
 
-    float H[3][3];
-    computeHMatrix(g_R, make_float3(g_t[0], g_t[1], g_t[2]),
-        make_float3(g_planes[indexP][0],
-            g_planes[indexP][1],
-            g_planes[indexP][2]),
-            g_planes[indexP][3],
-            H);
-    xy[index] = project(apply3x3Transformation(H, unproject(make_float2(indexX, indexY), g_K_ref)), g_K_other);
+	float H[3][3];
+	computeHMatrix(g_R, make_float3(g_t[0], g_t[1], g_t[2]),
+		make_float3(g_planes[indexP][0],
+			g_planes[indexP][1],
+			g_planes[indexP][2]),
+			g_planes[indexP][3],
+			H);
+	xy[index] = CAMERA_MODEL::project(apply3x3Transformation(H, CAMERA_MODEL::unproject(make_float2(indexX, indexY), g_K_ref)), g_K_other);
 }

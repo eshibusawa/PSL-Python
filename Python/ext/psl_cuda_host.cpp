@@ -26,11 +26,12 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include <vector>
-
 // CUDA forward declarations
-torch::Tensor getWarpedImageTensorCUDA(int ref, torch::Tensor image, torch::Tensor Ks, torch::Tensor xis, torch::Tensor Rs, torch::Tensor Ts, torch::Tensor rays, torch::Tensor Ps);
-torch::Tensor getRayTensorCUDA(int ref, torch::Tensor image, torch::Tensor Ks, torch::Tensor xis);
+namespace UnifiedCameraModel
+{
+torch::Tensor getWarpedImageTensorCUDA(int ref, torch::Tensor image, torch::Tensor Ks, torch::Tensor Rs, torch::Tensor Ts, torch::Tensor rays, torch::Tensor Ps);
+torch::Tensor getRayTensorCUDA(int ref, torch::Tensor image, torch::Tensor Ks);
+};
 
 // C++ interface
 #define CHECK_CUDA(x) TORCH_CHECK(x.type().is_cuda(), #x " must be a CUDA tensor")
@@ -39,46 +40,42 @@ torch::Tensor getRayTensorCUDA(int ref, torch::Tensor image, torch::Tensor Ks, t
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 #define CHECK_INPUT_CPU(x) CHECK_CPU(x); CHECK_CONTIGUOUS(x)
 
-torch::Tensor getWarpedImageTensor(int ref, torch::Tensor images, torch::Tensor Ks, torch::Tensor xis, torch::Tensor Rs, torch::Tensor Ts, torch::Tensor rays, torch::Tensor Ps)
+torch::Tensor getWarpedImageTensor(int ref, torch::Tensor images, torch::Tensor Ks, torch::Tensor Rs, torch::Tensor Ts, torch::Tensor rays, torch::Tensor Ps)
 {
 	CHECK_INPUT(images);
 	CHECK_INPUT_CPU(Ks);
-	CHECK_INPUT_CPU(xis);
 	CHECK_INPUT_CPU(Rs);
 	CHECK_INPUT_CPU(Ts);
 	CHECK_INPUT(rays);
 	CHECK_INPUT(Ps);
 
 	if ((images.sizes().size() != 3) || (images.scalar_type() != torch::kByte) ||
-		(Ks.sizes().size() != 3) || (Ks.scalar_type() != torch::kFloat) ||
-		(xis.sizes().size() != 1) || (xis.scalar_type() != torch::kFloat) ||
+		(Ks.sizes().size() != 2) || (Ks.scalar_type() != torch::kFloat) ||
 		(Rs.sizes().size() != 3) || (Rs.scalar_type() != torch::kFloat) ||
 		(Ts.sizes().size() != 3) || (Ts.scalar_type() != torch::kFloat) ||
 		(rays.sizes().size() != 3) || (rays.scalar_type() != torch::kFloat) ||
 		(Ps.sizes().size() != 2) || (Ps.scalar_type() != torch::kFloat))
 	{
 		std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
-		return {torch::Tensor()};
+		return torch::Tensor();
 	}
 
-	return getWarpedImageTensorCUDA(ref, images, Ks, xis, Rs, Ts, rays, Ps);
+	return UnifiedCameraModel::getWarpedImageTensorCUDA(ref, images, Ks, Rs, Ts, rays, Ps);
 }
 
-torch::Tensor getRayTensor(int ref, torch::Tensor images, torch::Tensor Ks, torch::Tensor xis)
+torch::Tensor getRayTensor(int ref, torch::Tensor images, torch::Tensor Ks)
 {
 	CHECK_INPUT(images);
 	CHECK_INPUT_CPU(Ks);
-	CHECK_INPUT_CPU(xis);
 
 	if ((images.sizes().size() != 3) || (images.scalar_type() != torch::kByte) ||
-		(Ks.sizes().size() != 3) || (Ks.scalar_type() != torch::kFloat) ||
-		(xis.sizes().size() != 1) || (xis.scalar_type() != torch::kFloat))
+		(Ks.sizes().size() != 2) || (Ks.scalar_type() != torch::kFloat))
 	{
 		std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
-		return {torch::Tensor()};
+		return torch::Tensor();
 	}
 
-	return getRayTensorCUDA(ref, images, Ks, xis);
+	return UnifiedCameraModel::getRayTensorCUDA(ref, images, Ks);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
