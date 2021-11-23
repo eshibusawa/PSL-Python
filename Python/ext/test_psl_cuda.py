@@ -83,6 +83,7 @@ class PSLCUDATestCase(TestCase):
         cuda_source = cuda_source.replace("HEIGHT", str(self.sz[0]))
         cuda_source = cuda_source.replace("WIDTH", str(self.sz[1]))
         cuda_source = cuda_source.replace("NUM_PLANES", str(self.num_planes))
+        cuda_source = cuda_source.replace("__host__", "__device__")
         self.module = cp.RawModule(code=cuda_source)
 
     def tearDown(self):

@@ -114,7 +114,7 @@ __global__ void getWarpedImageTensorCUDAKernel(
 	__syncthreads();
 }
 
-std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor images, torch::Tensor Ks, torch::Tensor xis, torch::Tensor Rs, torch::Tensor Ts, torch::Tensor Ps)
+torch::Tensor getWarpedImageTensorCUDA(int ref, torch::Tensor images, torch::Tensor Ks, torch::Tensor xis, torch::Tensor Rs, torch::Tensor Ts, torch::Tensor rays, torch::Tensor Ps)
 {
 	const int nImages = images.size(0);
 	const int nPlanes = Ps.size(0);
@@ -125,27 +125,9 @@ std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor image
 		.device(torch::kCUDA, 0);
 	auto warpedImages = torch::empty({nImages - 1, nPlanes, height, width}, WarpedImagesOptions);
 
-	auto RaysOptions =
-	torch::TensorOptions()
-		.dtype(torch::kFloat)
-		.device(torch::kCUDA, 0);
-	auto rays = torch::empty({height, width, 3}, RaysOptions);
-
-	const float *p_K_ref = Ks.data_ptr<float>() + 9 * ref;
-	const float *p_xi_ref = xis.data_ptr<float>() + ref;
-	float3 *p_rays = reinterpret_cast<float3 *>(rays.data_ptr<float>());
-	Intrinsics kr = getIntrinsics(p_K_ref, *p_xi_ref);
-	{
-		const dim3 threads(32, 32);
-		const dim3 blocks(iDivUp(width, threads.x), iDivUp(height, threads.y));
-		getRaysCUDAKernel<<<blocks, threads>>>(
-				p_rays,
-				kr,
-				height, width);
-	}
-
 	int l = 0;
 	const unsigned char *p_images = images.data_ptr<unsigned char>();
+	const float3 *p_rays = reinterpret_cast<float3 *>(rays.data_ptr<float>());
 	const float *p_R_ref = Rs.data_ptr<float>() + 9 * ref;
 	const float *p_T_ref = Ts.data_ptr<float>() + 3 * ref;
 	const float *p_P = Ps.data_ptr<float>();
@@ -183,5 +165,30 @@ std::vector<torch::Tensor> getWarpedImageTensorCUDA(int ref, torch::Tensor image
 		l++;
 	}
 
-	return {warpedImages, rays};
+	return warpedImages;
+}
+
+torch::Tensor getRayTensorCUDA(int ref, torch::Tensor images, torch::Tensor Ks, torch::Tensor xis)
+{
+	const int width = images.size(2), height = images.size(1);
+	auto RaysOptions =
+	torch::TensorOptions()
+		.dtype(torch::kFloat)
+		.device(torch::kCUDA, 0);
+	auto rays = torch::empty({height, width, 3}, RaysOptions);
+
+	const float *p_K_ref = Ks.data_ptr<float>() + 9 * ref;
+	const float *p_xi_ref = xis.data_ptr<float>() + ref;
+	float3 *p_rays = reinterpret_cast<float3 *>(rays.data_ptr<float>());
+	Intrinsics kr = getIntrinsics(p_K_ref, *p_xi_ref);
+	{
+		const dim3 threads(32, 32);
+		const dim3 blocks(iDivUp(width, threads.x), iDivUp(height, threads.y));
+		getRaysCUDAKernel<<<blocks, threads>>>(
+				p_rays,
+				kr,
+				height, width);
+	}
+
+	return rays;
 }

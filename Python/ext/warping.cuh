@@ -70,11 +70,4 @@ inline __device__ void computeHMatrix(const float R[3][3], float3 t, float3 n, f
 	H[2][2] = R[2][2] + (t.z * n.z / d);
 }
 
-inline __device__ float2 unprojectHProject(const Intrinsics K_ref, const Intrinsics K_other, const float H[3][3], float2 xy)
-{
-    float3 ray = unproject(xy, K_ref);
-    float3 Hray = apply3x3Transformation(H, ray);
-    return project(Hray, K_other);
-}
-
 #endif // WARPING_CUH_

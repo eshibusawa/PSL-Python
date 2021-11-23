@@ -52,8 +52,10 @@ class plane_sweep():
         self.plane_generation_mode = self.plane_generation_mode_['uniform_disparity']
         self.matching_costs_ = {'sad':0, 'zncc':1}
         self.matching_costs = self.matching_costs_['sad']
+        self.matching_gpu_batch_enabled = False
         self.sub_pixel_interpolation_mode_ = {'direct':0, 'inverse':1}
         self.sub_pixel_interpolation_mode = self.sub_pixel_interpolation_mode_['inverse']
+        self.ouput_cost_volume_enabled = False
         self.sub_pixel_enabled = True
         self.box_filer_ad_enabled = True
         self.write_debug_warping_enabled = False
@@ -209,7 +211,8 @@ class plane_sweep():
         try:
             import torch
             import psl_cuda as py_psl_cuda
-            import kornia.filters
+            from pixel_cost_cuda import absolute_difference as ad_cost_cuda
+            from pixel_cost_cuda import zero_mean_normalized_cross_correlation as zncc_cost_cuda
         except ImportError:
             self.use_gpu = False
 
@@ -224,15 +227,14 @@ class plane_sweep():
         return D
 
     def get_depth_gpu(self, ref = 0):
-        if self.matching_costs != 0:
-            raise ValueError("Only SAD is supported!")
         if self.sub_pixel_enabled:
             raise ValueError("Subpixel estimation is not supported!")
 
         try:
             import torch
             import psl_cuda as py_psl_cuda
-            import kornia.filters
+            from pixel_cost_cuda import absolute_difference as ad_cost_cuda
+            from pixel_cost_cuda import zero_mean_normalized_cross_correlation as zncc_cost_cuda
         except ImportError:
             return None
 
@@ -249,29 +251,40 @@ class plane_sweep():
         t_Ts = torch.tensor(np.array(self.Ts), dtype=torch.float32, device=torch.device('cpu'))
         t_Ps = torch.tensor(self.planes.T, dtype=torch.float32, device=torch.device('cuda'))
 
+        # cost function
+        if self.matching_costs == 1:
+            cost_function = zncc_cost_cuda(t_imgs[ref], (self.match_window_width, self.match_window_height),
+                                self.matching_gpu_batch_enabled)
+        else:
+            cost_function = ad_cost_cuda(t_imgs[ref], (self.match_window_width, self.match_window_height),
+                                self.box_filer_ad_enabled, self.matching_gpu_batch_enabled)
+
         # compute warped images
-        warped_images_gpu, rays_gpu = py_psl_cuda.get_warped_image_tensor(ref, t_imgs, t_Ks, t_xis, t_Rs, t_Ts, t_Ps)
+        rays_gpu = py_psl_cuda.get_ray_tensor(ref, t_imgs, t_Ks, t_xis)
+        warped_images_gpu = py_psl_cuda.get_warped_image_tensor(ref, t_imgs, t_Ks, t_xis, t_Rs, t_Ts, rays_gpu, t_Ps)
         if self.write_debug_warping_enabled:
             warped_images = warped_images_gpu.to('cpu').numpy()
             for k in range(0, n_imgs - 1):
                 for l in range(0, self.planes.shape[1]):
                     cv2.imwrite('debug_warping_{:04d}_{:04d}.png'.format(k, l), warped_images[k, l])
-        ad_gpu = torch.abs(t_imgs[ref].to(torch.float16) - warped_images_gpu)
+
+        # compute cost volume
+        CV = cost_function.get_cost_volume(warped_images_gpu)
         del warped_images_gpu
         torch.cuda.empty_cache()
 
-        # sad
-        box_filer_size = (self.match_window_width, self.match_window_height)
-        sad = torch.mean(kornia.filters.box_blur(ad_gpu, box_filer_size, border_type='replicate', normalized=False), dim=0)
-        del ad_gpu
-        torch.cuda.empty_cache()
-
-        indices = torch.argmin(sad, dim=0)
+        # WTA
+        indices_gpu = torch.argmin(CV, dim = 0)
+        # download result and compute depth
+        indices = indices_gpu.to('cpu').numpy()
         self.rays = rays_gpu.to('cpu').numpy().transpose(2, 0, 1).reshape(3, -1)
-        D = self.get_depth_from_planes(indices.to('cpu').numpy())
+        D = self.get_depth_from_planes(indices)
 
-        del sad, rays_gpu, indices
-        del t_imgs, t_Ks, t_xis, t_Rs, t_Ts, t_Ps
+        if self.ouput_cost_volume_enabled:
+            self.CV = CV.to('cpu').numpy().transpose(1, 2, 0)
+
+        del CV, rays_gpu, indices_gpu
+        del t_imgs, t_Ps
         torch.cuda.empty_cache()
 
         return D

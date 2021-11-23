@@ -49,5 +49,5 @@ extern "C" __global__ void warpingTest(float2 *xy)
             g_planes[indexP][2]),
             g_planes[indexP][3],
             H);
-    xy[index] = unprojectHProject(g_K_ref, g_K_other, H, make_float2(indexX, indexY));
+    xy[index] = project(apply3x3Transformation(H, unproject(make_float2(indexX, indexY), g_K_ref)), g_K_other);
 }

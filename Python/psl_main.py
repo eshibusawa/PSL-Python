@@ -54,11 +54,9 @@ if __name__ == '__main__':
     if use_gpu:
         pyps.use_gpu = True
         pyps.sub_pixel_enabled = False
-        pyps.matching_costs = pyps.matching_costs_['sad']
     else:
         pyps.use_gpu = False
         pyps.sub_pixel_enabled = True
-        pyps.matching_costs = pyps.matching_costs_['zncc']
 
     for k in range(0, len(imgs)):
         pyps.add_image(uc_new, Rs[k], Ts[k], imgs[k])
