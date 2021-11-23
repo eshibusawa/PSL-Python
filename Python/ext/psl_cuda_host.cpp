@@ -33,6 +33,8 @@ torch::Tensor getWarpedImageTensorCUDA(int ref, torch::Tensor image, torch::Tens
 torch::Tensor getRayTensorCUDA(int ref, torch::Tensor image, torch::Tensor Ks);
 };
 
+torch::Tensor getDepthTensorCUDA(torch::Tensor rays, torch::Tensor indices, torch::Tensor Ps);
+
 // C++ interface
 #define CHECK_CUDA(x) TORCH_CHECK(x.type().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CPU(x) TORCH_CHECK(!x.type().is_cuda(), #x " must be a CPU tensor")
@@ -78,8 +80,26 @@ torch::Tensor getRayTensor(int ref, torch::Tensor images, torch::Tensor Ks)
 	return UnifiedCameraModel::getRayTensorCUDA(ref, images, Ks);
 }
 
+torch::Tensor getDepthTensor(torch::Tensor rays, torch::Tensor indices, torch::Tensor Ps)
+{
+	CHECK_INPUT(rays);
+	CHECK_INPUT(indices);
+	CHECK_INPUT(Ps);
+
+	if ((rays.sizes().size() != 3) || (rays.scalar_type() != torch::kFloat) ||
+		(indices.sizes().size() != 2) || (indices.scalar_type() != torch::kLong) ||
+		(Ps.sizes().size() != 2) || (Ps.scalar_type() != torch::kFloat))
+	{
+		std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+		return torch::Tensor();
+	}
+
+	return getDepthTensorCUDA(rays, indices, Ps);
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
 	m.def("get_ray_tensor", &getRayTensor, "compute ray (CUDA)");
 	m.def("get_warped_image_tensor", &getWarpedImageTensor, "warp images (CUDA)");
+	m.def("get_depth_tensor", &getDepthTensor, "compute depth (CUDA)");
 }

@@ -24,6 +24,7 @@
 
 #include "unified_camera.cuh"
 #include "warping.cuh"
+#include "depth.cuh"
 
 #include "psl_cuda_utils.hpp"
 
@@ -44,3 +45,52 @@ torch::Tensor getRayTensorCUDA(int ref, torch::Tensor image, torch::Tensor Ks)
     return getRayTensorCUDA<5>(ref, image, Ks);
 }
 };
+
+__global__ void getDepthCUDAKernel(
+	float* __restrict__ output,
+	const float3* __restrict__ rays,
+	const long* __restrict__ indices,
+	const float4* __restrict__ planes,
+	int height,
+	int width)
+{
+	const int indexX = blockIdx.x * blockDim.x + threadIdx.x;
+	const int indexY = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if ((indexX >= width) || (indexY >= height))
+	{
+		return;
+	}
+
+	const int index = indexX + indexY * width;
+	const int indexP = indices[index];
+	float4 plane = make_float4(planes[indexP].x, planes[indexP].y, planes[indexP].z, planes[indexP].w);
+	output[index] = getDepthFromRayAndPlane(rays[index], plane);
+}
+
+torch::Tensor getDepthTensorCUDA(torch::Tensor rays, torch::Tensor indices, torch::Tensor Ps)
+{
+	const int width = rays.size(1), height = rays.size(0);
+	auto DepthOptions =
+	torch::TensorOptions()
+		.dtype(torch::kFloat)
+		.device(torch::kCUDA, 0);
+	auto depths = torch::empty({height, width}, DepthOptions);
+
+	float *p_depths = depths.data_ptr<float>();
+	const float3 *p_rays = reinterpret_cast<float3 *>(rays.data_ptr<float>());
+	const long *p_indices = indices.data_ptr<long>();
+	const float4 *p_planes = reinterpret_cast<float4 *>(Ps.data_ptr<float>());
+	{
+		const dim3 threads(32, 32);
+		const dim3 blocks(iDivUp(width, threads.x), iDivUp(height, threads.y));
+		getDepthCUDAKernel<<<blocks, threads>>>(
+                p_depths,
+				p_rays,
+                p_indices,
+                p_planes,
+				height, width);
+	}
+
+	return depths;
+}

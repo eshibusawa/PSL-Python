@@ -196,3 +196,127 @@ class UCMTestCase(TestCase):
         # evaluate error
         err = np.abs(xy - np.array(xy_ref))
         ok_(np.max(err) < self.eps_reproj)
+
+class DepthEstimationTestCase(TestCase):
+    def setUp(self):
+        self.eps = 1E-4
+        self.intrinsics = np.array([447.77409157, 447.37213065, 324.56178482, 199.10951743, 1.1584422115726898], dtype=np.float32)
+        self.sz = 400, 640
+        self.num_planes = 16
+
+        K = np.eye(3, dtype=np.float32)
+        K[0,0] = self.intrinsics[0]
+        K[1,1] = self.intrinsics[1]
+        K[0,2] = self.intrinsics[2]
+        K[1,2] = self.intrinsics[3]
+        self.ucm_ref = ucm(K, self.intrinsics[4])
+
+        dn = os.path.dirname(os.path.realpath(__file__))
+        sources = list()
+        sources.append('depth.cuh')
+        sources.append('depth_unit_test.cu')
+        cuda_source = None
+        for fn in sources:
+            fpfn = os.path.join(dn, fn)
+            # load raw kernel
+            with open(fpfn, 'r') as f:
+                if cuda_source is None:
+                    cuda_source = f.read()
+                else:
+                    cuda_source += f.read()
+        cuda_source = cuda_source.replace("HEIGHT", str(self.sz[0]))
+        cuda_source = cuda_source.replace("WIDTH", str(self.sz[1]))
+        cuda_source = cuda_source.replace("NUM_PLANES", str(self.num_planes))
+        cuda_source = cuda_source.replace("__host__", "__device__")
+        self.module = cp.RawModule(code=cuda_source)
+
+    def tearDown(self):
+        pass
+
+    def depth_estimation_test(self):
+        ps = psl()
+        ps.num_planes = self.num_planes
+        ps.generate_planes()
+        ps.planes = ps.planes.astype(np.float32)
+        ps.add_image(self.ucm_ref, None, None, None)
+        ps.rays = self.ucm_ref.unproject_rays(self.sz).astype(np.float32)
+        ps.CV = (np.random.rand(*self.sz, self.num_planes) + 1).astype(np.float32)
+        indices = (np.random.rand(*self.sz) * self.num_planes).astype(np.int64)
+        np.put_along_axis(ps.CV, indices[:,:,np.newaxis], 0, axis=2)
+
+        # upload planes
+        planes_ptr = self.module.get_global("g_planes")
+        vplanes = ps.planes.T.reshape(-1)
+        planes_gpu = cp.ndarray(vplanes.shape, cp.float32, planes_ptr)
+        planes_gpu[:] = cp.array(vplanes)
+
+        planes_has_neighbor_ptr = self.module.get_global("g_planesHasNeighbor")
+        planes_has_neighbor_gpu = cp.ndarray(ps.planes_has_neighbor.shape, cp.bool, planes_has_neighbor_ptr)
+        planes_has_neighbor_gpu[:] = cp.array(ps.planes_has_neighbor)
+
+        D_gpu = torch.zeros((self.sz[0], self.sz[1]), dtype=torch.float32, device='cuda')
+        sz_block = 32, 32
+        sz_grid = math.ceil(self.sz[1] / sz_block[1]), math.ceil(self.sz[0] / sz_block[0])
+
+        # upload indices
+        indices_gpu = torch.tensor(indices, device=torch.device('cuda'))
+        rays_t = ps.rays.reshape(3, *self.sz)
+        rays_gpu = torch.tensor(rays_t.transpose(1, 2, 0), device=torch.device('cuda'))
+
+        # call the kernel
+        test_depth_gpufunc = self.module.get_function("getDepthTest")
+        test_depth_gpufunc(
+            block=sz_block,
+            grid=sz_grid,
+            args=(
+                rays_gpu.data_ptr(),
+                indices_gpu.data_ptr(),
+                D_gpu.data_ptr(),
+            )
+        )
+        ps.sub_pixel_enabled = False
+        D_ref = ps.get_depth_from_planes(indices)
+        D = D_gpu.to('cpu').numpy()
+        err = np.abs(D - D_ref)
+        ok_(np.max(err) < self.eps)
+
+        # upload CV
+        CV_gpu = torch.tensor(ps.CV.transpose(2, 0, 1), device=torch.device('cuda'))
+
+        # call the kernel
+        test_depth_gpufunc = self.module.get_function("getDepthWithSubpixelDirectTest")
+        test_depth_gpufunc(
+            block=sz_block,
+            grid=sz_grid,
+            args=(
+                rays_gpu.data_ptr(),
+                indices_gpu.data_ptr(),
+                CV_gpu.data_ptr(),
+                D_gpu.data_ptr(),
+            )
+        )
+        ps.sub_pixel_enabled = True
+        ps.sub_pixel_interpolation_mode = ps.sub_pixel_interpolation_mode_['direct']
+        D_ref = ps.get_depth_from_planes(indices)
+        D = D_gpu.to('cpu').numpy()
+        err = np.abs(D - D_ref)
+        ok_(np.max(err) < self.eps)
+
+        # call the kernel
+        test_depth_gpufunc = self.module.get_function("getDepthWithSubpixelInverseTest")
+        test_depth_gpufunc(
+            block=sz_block,
+            grid=sz_grid,
+            args=(
+                rays_gpu.data_ptr(),
+                indices_gpu.data_ptr(),
+                CV_gpu.data_ptr(),
+                D_gpu.data_ptr(),
+            )
+        )
+        ps.sub_pixel_enabled = True
+        ps.sub_pixel_interpolation_mode = ps.sub_pixel_interpolation_mode_['inverse']
+        D_ref = ps.get_depth_from_planes(indices)
+        D = D_gpu.to('cpu').numpy()
+        err = np.abs(D - D_ref)
+        ok_(np.max(err) < self.eps)

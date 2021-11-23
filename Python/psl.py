@@ -276,15 +276,13 @@ class plane_sweep():
 
         # WTA
         indices_gpu = torch.argmin(CV, dim = 0)
-        # download result and compute depth
-        indices = indices_gpu.to('cpu').numpy()
-        self.rays = rays_gpu.to('cpu').numpy().transpose(2, 0, 1).reshape(3, -1)
-        D = self.get_depth_from_planes(indices)
+        D_gpu = py_psl_cuda.get_depth_tensor(rays_gpu, indices_gpu, t_Ps)
+        D = D_gpu.to('cpu').numpy()
 
         if self.ouput_cost_volume_enabled:
             self.CV = CV.to('cpu').numpy().transpose(1, 2, 0)
 
-        del CV, rays_gpu, indices_gpu
+        del CV, rays_gpu, indices_gpu, D_gpu
         del t_imgs, t_Ps
         torch.cuda.empty_cache()
 
