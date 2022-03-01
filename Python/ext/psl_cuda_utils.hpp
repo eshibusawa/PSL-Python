@@ -53,7 +53,6 @@ class TextureObjectCreator
 public:
 	TextureObjectCreator(const ScalarType *p, int w, int h):
 		m_pDevice(p)
-		, m_pArray(0)
 		, m_width(w)
 		, m_height(h)
 		, m_texObject(0)
@@ -63,19 +62,18 @@ public:
 	~TextureObjectCreator()
 	{
 		checkCudaErrors(cudaDestroyTextureObject(m_texObject));
-		checkCudaErrors(cudaFreeArray(m_pArray));
 	}
 
 	cudaTextureObject_t getTextureObject()
 	{
 		cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc(8 * sizeof(ScalarType), 0, 0, 0, cudaChannelFormatKindUnsigned);
-		checkCudaErrors(cudaMallocArray(&m_pArray, &channelDesc, m_width, m_height));
-		checkCudaErrors(cudaMemcpy2DToArray(m_pArray, 0, 0, m_pDevice,
-			m_width * sizeof(ScalarType), m_width * sizeof(ScalarType), m_height, cudaMemcpyDeviceToDevice));
-
 		memset(&m_texRes, 0, sizeof(cudaResourceDesc));
-		m_texRes.resType = cudaResourceTypeArray;
-		m_texRes.res.array.array = m_pArray;
+		m_texRes.resType = cudaResourceTypePitch2D;
+		m_texRes.res.pitch2D.devPtr = const_cast<ScalarType *>(m_pDevice);
+		m_texRes.res.pitch2D.desc = channelDesc;
+		m_texRes.res.pitch2D.width = m_width;
+		m_texRes.res.pitch2D.height = m_height;
+		m_texRes.res.pitch2D.pitchInBytes = m_width * sizeof(ScalarType);
 
 		memset(&m_texDescr, 0, sizeof(cudaTextureDesc));
 		m_texDescr.normalizedCoords = true;
@@ -90,7 +88,6 @@ public:
 
 private:
 	const ScalarType *m_pDevice;
-	cudaArray *m_pArray;
 	int m_width, m_height;
 	cudaTextureObject_t m_texObject;
 	cudaTextureDesc m_texDescr;
