@@ -44,24 +44,66 @@ class absolute_difference():
                 self.CV[:,:,l] = self.box_filter(self.CV[:,:,l])
         return self.CV
 
+class zero_mean_absolute_difference():
+    def __init__(self, img_ref, n_planes, kernel_size = (7, 7), box_filter_enabled = True, scale = 1.0):
+        self.CV = np.zeros((img_ref.shape[0], img_ref.shape[1], n_planes), np.float32)
+        self.img_ref = img_ref
+        self.box_filter_enabled = box_filter_enabled
+        self.kernel_size = kernel_size
+        self.scale = scale
+        self.box_filter = (lambda x, f: cv2.boxFilter(x, ddepth = cv2.CV_32F, ksize=self.kernel_size, normalize=f, borderType=cv2.BORDER_REPLICATE))
+        img_box = self.img_ref - self.box_filter(self.img_ref, True)
+        self.img_box = img_box
+
+    def accumulate(self, warp, index):
+        warp_box = warp - self.box_filter(warp, True)
+        cost = np.abs(self.img_box - warp_box.astype(self.CV.dtype))
+        self.CV[:,:,index] += (self.scale * cost)
+
+    def get_cost_volume(self):
+        if self.box_filter_enabled:
+            for l in range(0, self.CV.shape[2]):
+                self.CV[:,:,l] = self.box_filter(self.CV[:,:,l], False)
+        return self.CV
+
 class zero_mean_normalized_cross_correlation():
     def __init__(self, img_ref, n_planes, kernel_size = (7, 7), scale = 1.0):
         self.CV = np.zeros((img_ref.shape[0], img_ref.shape[1], n_planes), np.float32)
-        self.img_ref = img_ref
         self.kernel_size = kernel_size
         self.scale = scale
         self.eps = 1E-7
         self.box_filter = (lambda x, f: cv2.boxFilter(x, ddepth = cv2.CV_32F, ksize=self.kernel_size, normalize=f, borderType=cv2.BORDER_REPLICATE))
-        img_box = self.img_ref - self.box_filter(self.img_ref, True)
-        img_sqr_box = self.box_filter(img_box * img_box, False)
+        img_box = img_ref - self.box_filter(img_ref, True)
+        img_sqr_box = self.box_filter(np.square(img_box), False)
         self.img_box = img_box
         self.img_sqr_box = img_sqr_box
 
     def accumulate(self, warp, index):
         warp_box = warp - self.box_filter(warp, True)
-        warp_sqr_box = self.box_filter(warp_box * warp_box, False)
+        warp_sqr_box = self.box_filter(np.square(warp_box), False)
         cross = warp_box * self.img_box
         nume = self.box_filter(cross, False)
+        denom = warp_sqr_box * self.img_sqr_box
+        cost = (1 - (nume/(np.sqrt(denom) + self.eps)))/2
+        self.CV[:,:,index] += (self.scale * cost)
+
+    def get_cost_volume(self):
+        return self.CV
+
+class normalized_cross_correlation():
+    def __init__(self, img_ref, n_planes, kernel_size = (7, 7), scale = 1.0):
+        self.CV = np.zeros((img_ref.shape[0], img_ref.shape[1], n_planes), np.float32)
+        self.img_ref = img_ref.astype(np.float32)
+        self.kernel_size = kernel_size
+        self.scale = scale
+        self.eps = 1E-7
+        self.box_filter = (lambda x: cv2.boxFilter(x, ddepth = cv2.CV_32F, ksize=self.kernel_size, normalize=False, borderType=cv2.BORDER_REPLICATE))
+        self.img_sqr_box = self.box_filter(np.square(img_ref, dtype=np.float32))
+
+    def accumulate(self, warp, index):
+        warp_sqr_box = self.box_filter(np.square(warp, dtype=np.float32))
+        cross = warp * self.img_ref
+        nume = self.box_filter(cross)
         denom = warp_sqr_box * self.img_sqr_box
         cost = (1 - (nume/(np.sqrt(denom) + self.eps)))/2
         self.CV[:,:,index] += (self.scale * cost)

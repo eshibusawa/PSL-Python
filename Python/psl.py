@@ -28,6 +28,8 @@ import cv2
 from colormap import colormap as jet
 from pixel_cost import absolute_difference as ad_cost
 from pixel_cost import zero_mean_normalized_cross_correlation as zncc_cost
+from pixel_cost import zero_mean_absolute_difference as zsad_cost
+from pixel_cost import normalized_cross_correlation as ncc_cost
 
 def depth_to_colormap(depth, min_z, max_z):
     mask = depth > 0
@@ -50,7 +52,7 @@ class plane_sweep():
         self.num_ground = 16
         self.plane_generation_mode_ = {'uniform_depth':0, 'uniform_disparity':1}
         self.plane_generation_mode = self.plane_generation_mode_['uniform_disparity']
-        self.matching_costs_ = {'sad':0, 'zncc':1}
+        self.matching_costs_ = {'sad':0, 'zncc':1, 'zsad':2, 'ncc':3}
         self.matching_costs = self.matching_costs_['sad']
         self.matching_gpu_batch_enabled = False
         self.sub_pixel_interpolation_mode_ = {'direct':0, 'inverse':1}
@@ -127,6 +129,10 @@ class plane_sweep():
         accumlation_scale = 1.0 / (n_imgs - 1)
         if self.matching_costs == 1:
             cost_function = zncc_cost(self.imgs[ref], n_planes, (self.match_window_width, self.match_window_height), scale=accumlation_scale)
+        elif self.matching_costs == 2:
+            cost_function = zsad_cost(self.imgs[ref], n_planes, (self.match_window_width, self.match_window_height), self.box_filer_before_occlusion_enabled, scale=accumlation_scale)
+        elif self.matching_costs == 3:
+            cost_function = ncc_cost(self.imgs[ref], n_planes, (self.match_window_width, self.match_window_height), scale=accumlation_scale)
         else:
             cost_function = ad_cost(self.imgs[ref], n_planes, (self.match_window_width, self.match_window_height), self.box_filer_ad_enabled, scale=accumlation_scale)
 
