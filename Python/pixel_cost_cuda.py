@@ -58,6 +58,43 @@ class absolute_difference():
         torch.cuda.empty_cache()
         return CV
 
+class zero_mean_absolute_difference():
+    def __init__(self, img_ref, kernel_size = (7, 7), box_filter_enabled = True, use_batch = True):
+        self.use_batch = use_batch
+        self.kernel_size = kernel_size
+        self.box_filter_enabled = box_filter_enabled
+        self.precision = torch.float16
+        self.img_ref = img_ref.to(self.precision)
+        self.box_filter = (lambda x, f: kornia.filters.box_blur(x, self.kernel_size, border_type='replicate', normalized=f))
+        img_ref2 = img_ref[None, None, :]
+        self.img_box = img_ref2 - self.box_filter(img_ref2.to(self.precision), True)
+
+    def get_cost_volume(self, warped_images):
+        if self.use_batch:
+            warp_box = warped_images - self.box_filter(warped_images.to(self.precision), True)
+            ad = torch.abs(self.img_box - warp_box)
+            if self.box_filter_enabled:
+                CV = torch.mean(self.box_filter(ad), dim = 0)
+            else:
+                CV = torch.mean(ad, dim = 0)
+        else:
+            sad = None
+            scale = 1.0 / warped_images.shape[0]
+            for warped_image in warped_images:
+                w = warped_image[None, :]
+                warp_box = w - self.box_filter(w.to(self.precision), True)
+                ad = torch.abs(self.img_box - warp_box)
+                if self.box_filter_enabled:
+                    ad = self.box_filter(ad, False)[0, :]
+                if sad is None:
+                    sad = ad
+                else:
+                    sad += ad
+            CV = sad * scale
+            del sad, ad, warp_box
+            torch.cuda.empty_cache()
+        return CV
+
 class zero_mean_normalized_cross_correlation():
     def __init__(self, img_ref, kernel_size = (7, 7), use_batch = True):
         self.kernel_size = kernel_size
@@ -94,5 +131,42 @@ class zero_mean_normalized_cross_correlation():
             CV = (1 - (zncc[0] * scale))/2
             del zncc
         del warp_box, warp_sqr_box, cross, nume, denom
+        torch.cuda.empty_cache()
+        return CV
+
+class normalized_cross_correlation():
+    def __init__(self, img_ref, kernel_size = (7, 7), use_batch = True):
+        self.kernel_size = kernel_size
+        self.use_batch = use_batch
+        self.eps = 1E-7
+        self.precision = torch.float32
+        self.box_filter = (lambda x: kornia.filters.box_blur(x, self.kernel_size, border_type='replicate', normalized=False))
+        self.img_ref = img_ref.to(self.precision)[None, None, :]
+        self.img_sqr_box = self.box_filter(self.img_ref * self.img_ref)
+
+    def get_cost_volume(self, warped_images):
+        if self.use_batch:
+            w = warped_images.to(self.precision)
+            warp_sqr_box = self.box_filter(w * w)
+            cross = w * self.img_ref
+            nume = self.box_filter(cross)
+            denom = warp_sqr_box * self.img_sqr_box
+            CV = (1 - torch.mean(nume/(torch.sqrt(denom) + self.eps), dim = 0))/2
+        else:
+            zncc = None
+            scale = 1.0 / warped_images.shape[0]
+            for warped_image in warped_images:
+                w = warped_image.to(self.precision)[None, :]
+                warp_sqr_box = self.box_filter(w * w)
+                cross = w * self.img_ref
+                nume = self.box_filter(cross)
+                denom = warp_sqr_box * self.img_sqr_box
+                if zncc is None:
+                    zncc = (nume/(torch.sqrt(denom) + self.eps))
+                else:
+                    zncc += (nume/(torch.sqrt(denom) + self.eps))
+            CV = (1 - (zncc[0] * scale))/2
+            del zncc
+        del w, warp_sqr_box, cross, nume, denom
         torch.cuda.empty_cache()
         return CV

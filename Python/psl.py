@@ -217,8 +217,6 @@ class plane_sweep():
         try:
             import torch
             import psl_cuda as py_psl_cuda
-            from pixel_cost_cuda import absolute_difference as ad_cost_cuda
-            from pixel_cost_cuda import zero_mean_normalized_cross_correlation as zncc_cost_cuda
         except ImportError:
             self.use_gpu = False
 
@@ -241,6 +239,8 @@ class plane_sweep():
             import psl_cuda as py_psl_cuda
             from pixel_cost_cuda import absolute_difference as ad_cost_cuda
             from pixel_cost_cuda import zero_mean_normalized_cross_correlation as zncc_cost_cuda
+            from pixel_cost_cuda import zero_mean_absolute_difference as zsad_cost_cuda
+            from pixel_cost_cuda import normalized_cross_correlation as ncc_cost_cuda
         except ImportError:
             return None
 
@@ -261,6 +261,12 @@ class plane_sweep():
         # cost function
         if self.matching_costs == 1:
             cost_function = zncc_cost_cuda(t_imgs[ref], (self.match_window_width, self.match_window_height),
+                                self.matching_gpu_batch_enabled)
+        elif self.matching_costs == 2:
+            cost_function = zsad_cost_cuda(t_imgs[ref], (self.match_window_width, self.match_window_height),
+                                self.box_filer_before_occlusion_enabled, self.matching_gpu_batch_enabled)
+        elif self.matching_costs == 3:
+            cost_function = ncc_cost_cuda(t_imgs[ref], (self.match_window_width, self.match_window_height),
                                 self.matching_gpu_batch_enabled)
         else:
             cost_function = ad_cost_cuda(t_imgs[ref], (self.match_window_width, self.match_window_height),
