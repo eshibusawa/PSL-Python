@@ -1,5 +1,5 @@
 # This file is part of PSL-Python.
-# Copyright (c) 2021, Eijiro Shibusawa <phd_kimberlite@yahoo.co.jp>
+# Copyright (c) 2022, Eijiro Shibusawa <phd_kimberlite@yahoo.co.jp>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -22,17 +22,28 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from setuptools import setup
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+import cupy as cp
 
-setup(
-    name='psl_cuda',
-    ext_modules=[
-        CUDAExtension('psl_cuda', [
-            'psl_cuda_host.cpp',
-            'psl_cuda_device.cu'
-        ]),
-    ],
-    cmdclass={
-        'build_ext': BuildExtension
-    })
+def create_texture_object(img_gpu,
+    addressMode = cp.cuda.runtime.cudaAddressModeBorder,
+    filterMode = cp.cuda.runtime.cudaFilterModePoint,
+    readMode = cp.cuda.runtime.cudaReadModeElementType):
+    if img_gpu.dtype == cp.uint8:
+        channel_format_descriptor = cp.cuda.texture.ChannelFormatDescriptor(8, 0, 0, 0, cp.cuda.runtime.cudaChannelFormatKindUnsigned)
+    elif img_gpu.dtype == cp.int16:
+        channel_format_descriptor = cp.cuda.texture.ChannelFormatDescriptor(16, 0, 0, 0, cp.cuda.runtime.cudaChannelFormatKindSigned)
+    elif img_gpu.dtype == cp.float32:
+        channel_format_descriptor = cp.cuda.texture.ChannelFormatDescriptor(32, 0, 0, 0, cp.cuda.runtime.cudaChannelFormatKindFloat)
+    else:
+        return None
+    img_gpu_2d = cp.cuda.texture.CUDAarray(channel_format_descriptor, img_gpu.shape[1], img_gpu.shape[0])
+    img_gpu_2d.copy_from(img_gpu)
+
+    img_rd = cp.cuda.texture.ResourceDescriptor(cp.cuda.runtime.cudaResourceTypeArray,
+        cuArr = img_gpu_2d)
+    img_td = cp.cuda.texture.TextureDescriptor(addressModes = (addressMode, addressMode),
+        filterMode=filterMode,
+        readMode=readMode,
+        normalizedCoords = 0)
+    img_to = cp.cuda.texture.TextureObject(img_rd, img_td)
+    return img_to

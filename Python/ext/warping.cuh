@@ -25,49 +25,49 @@
 #ifndef WARPING_CUH_
 #define WARPING_CUH_
 
-inline __device__ float3 apply3x3Transformation(const float A[3][3], float3 x)
+inline __device__ float3 apply3x3Transformation(const float *A, float3 x)
 {
 	return make_float3
 	(
-		A[0][0] * x.x + A[0][1] * x.y + A[0][2] * x.z,
-		A[1][0] * x.x + A[1][1] * x.y + A[1][2] * x.z,
-		A[2][0] * x.x + A[2][1] * x.y + A[2][2] * x.z
+		A[0] * x.x + A[1] * x.y + A[2] * x.z,
+		A[3] * x.x + A[4] * x.y + A[5] * x.z,
+		A[6] * x.x + A[7] * x.y + A[8] * x.z
 	);
 }
 
-inline __host__ void getRelativeRotation(const float *R_ref, const float *R_other, float R[3][3])
+inline __device__ void getRelativeRotation(const float *R_ref, const float *R_other, float *R)
 {
-	R[0][0] = R_other[0] * R_ref[0] + R_other[1] * R_ref[1] + R_other[2] * R_ref[2];
-	R[0][1] = R_other[0] * R_ref[3] + R_other[1] * R_ref[4] + R_other[2] * R_ref[5];
-	R[0][2] = R_other[0] * R_ref[6] + R_other[1] * R_ref[7] + R_other[2] * R_ref[8];
-	R[1][0] = R_other[3] * R_ref[0] + R_other[4] * R_ref[1] + R_other[5] * R_ref[2];
-	R[1][1] = R_other[3] * R_ref[3] + R_other[4] * R_ref[4] + R_other[5] * R_ref[5];
-	R[1][2] = R_other[3] * R_ref[6] + R_other[4] * R_ref[7] + R_other[5] * R_ref[8];
-	R[2][0] = R_other[6] * R_ref[0] + R_other[7] * R_ref[1] + R_other[8] * R_ref[2];
-	R[2][1] = R_other[6] * R_ref[3] + R_other[7] * R_ref[4] + R_other[8] * R_ref[5];
-	R[2][2] = R_other[6] * R_ref[6] + R_other[7] * R_ref[7] + R_other[8] * R_ref[8];
+	R[0] = R_other[0] * R_ref[0] + R_other[1] * R_ref[1] + R_other[2] * R_ref[2];
+	R[1] = R_other[0] * R_ref[3] + R_other[1] * R_ref[4] + R_other[2] * R_ref[5];
+	R[2] = R_other[0] * R_ref[6] + R_other[1] * R_ref[7] + R_other[2] * R_ref[8];
+	R[3] = R_other[3] * R_ref[0] + R_other[4] * R_ref[1] + R_other[5] * R_ref[2];
+	R[4] = R_other[3] * R_ref[3] + R_other[4] * R_ref[4] + R_other[5] * R_ref[5];
+	R[5] = R_other[3] * R_ref[6] + R_other[4] * R_ref[7] + R_other[5] * R_ref[8];
+	R[6] = R_other[6] * R_ref[0] + R_other[7] * R_ref[1] + R_other[8] * R_ref[2];
+	R[7] = R_other[6] * R_ref[3] + R_other[7] * R_ref[4] + R_other[8] * R_ref[5];
+	R[8] = R_other[6] * R_ref[6] + R_other[7] * R_ref[7] + R_other[8] * R_ref[8];
 }
 
-inline __host__ float3 getRelativeTranslation(const float *T_ref, const float *T_other, float R[3][3])
+inline __device__ float3 getRelativeTranslation(const float *T_ref, const float *T_other, const float *R)
 {
 	return make_float3(
-		R[0][0] * T_ref[0] + R[0][1] * T_ref[1] + R[0][2] * T_ref[2] - T_other[0],
-		R[1][0] * T_ref[0]+ R[1][1] * T_ref[1] + R[1][2] * T_ref[2] - T_other[1],
-		R[2][0] * T_ref[0] + R[2][1] * T_ref[1] + R[2][2] * T_ref[2] - T_other[2]
+		R[0] * T_ref[0] + R[1] * T_ref[1] + R[2] * T_ref[2] - T_other[0],
+		R[3] * T_ref[0] + R[4] * T_ref[1] + R[5] * T_ref[2] - T_other[1],
+		R[6] * T_ref[0] + R[7] * T_ref[1] + R[8] * T_ref[2] - T_other[2]
 	);
 }
 
-inline __device__ void computeHMatrix(const float R[3][3], float3 t, float3 n, float d, float H[3][3])
+inline __device__ void computeHMatrix(const float *R, float3 *t, float4 *p, float *H)
 {
-	H[0][0] = R[0][0] + (t.x * n.x / d);
-	H[0][1] = R[0][1] + (t.x * n.y / d);
-	H[0][2] = R[0][2] + (t.x * n.z / d);
-	H[1][0] = R[1][0] + (t.y * n.x / d);
-	H[1][1] = R[1][1] + (t.y * n.y / d);
-	H[1][2] = R[1][2] + (t.y * n.z / d);
-	H[2][0] = R[2][0] + (t.z * n.x / d);
-	H[2][1] = R[2][1] + (t.z * n.y / d);
-	H[2][2] = R[2][2] + (t.z * n.z / d);
+	H[0] = R[0] + (t->x * p->x / p->w);
+	H[1] = R[1] + (t->x * p->y / p->w);
+	H[2] = R[2] + (t->x * p->z / p->w);
+	H[3] = R[3] + (t->y * p->x / p->w);
+	H[4] = R[4] + (t->y * p->y / p->w);
+	H[5] = R[5] + (t->y * p->z / p->w);
+	H[6] = R[6] + (t->z * p->x / p->w);
+	H[7] = R[7] + (t->z * p->y / p->w);
+	H[8] = R[8] + (t->z * p->z / p->w);
 }
 
 #endif // WARPING_CUH_

@@ -24,7 +24,7 @@
 
 __constant__ CAMERA_MODEL::Intrinsics g_K_ref;
 __constant__ CAMERA_MODEL::Intrinsics g_K_other;
-__constant__ float g_R[3][3];
+__constant__ float g_R[9];
 __constant__ float g_t[3];
 __constant__ float g_planes[NUM_PLANES][4];
 
@@ -42,12 +42,12 @@ extern "C" __global__ void warpingTest(float2 *xy)
 
 	int index = indexX + indexY * WIDTH + (WIDTH * HEIGHT * indexP);
 
-	float H[3][3];
-	computeHMatrix(g_R, make_float3(g_t[0], g_t[1], g_t[2]),
-		make_float3(g_planes[indexP][0],
+	float H[9];
+	float3 t = make_float3(g_t[0], g_t[1], g_t[2]);
+	float4 P = make_float4(g_planes[indexP][0],
 			g_planes[indexP][1],
-			g_planes[indexP][2]),
-			g_planes[indexP][3],
-			H);
+			g_planes[indexP][2],
+			g_planes[indexP][3]);
+	computeHMatrix(g_R, &t, &P,	H);
 	xy[index] = CAMERA_MODEL::project(apply3x3Transformation(H, CAMERA_MODEL::unproject(make_float2(indexX, indexY), g_K_ref)), g_K_other);
 }

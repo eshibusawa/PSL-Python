@@ -33,7 +33,7 @@ struct Intrinsics
 	float xi;
 };
 
-inline __host__ Intrinsics getIntrinsics(const float *K)
+inline __device__ Intrinsics getIntrinsics(const float *K)
 {
 	Intrinsics ret;
 	ret.fufv = make_float2(K[0], K[1]);
@@ -57,10 +57,7 @@ inline __device__ float3 unproject(const float2 x, const Intrinsics K)
 	float2 rxy = make_float2((x.x - K.u0v0.x) / K.fufv.x, (x.y - K.u0v0.y) / K.fufv.y);
 	float rsqr = rxy.x * rxy.x + rxy.y * rxy.y;
 	float d = 1 + (1 - K.xi * K.xi) * rsqr;
-	if (d < 0)
-	{
-		d = -d;
-	}
+	d = fabsf(d);
 	float F = (K.xi + sqrtf(d)) / (rsqr + 1);
 	float3 X = make_float3(F * rxy.x, F * rxy.y, F - K.xi);
 	return X;
