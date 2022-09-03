@@ -102,6 +102,7 @@ class UCMTestCase(TestCase):
         intrinsics_gpu[:] = cp.array(self.intrinsics)
 
         xyz_gpu = torch.zeros((self.sz[0], self.sz[1], 3), dtype=torch.float32, device='cuda')
+        assert xyz_gpu.is_contiguous()
         sz_block = 32, 32
         sz_grid = math.ceil(self.sz[1] / sz_block[1]), math.ceil(self.sz[0] / sz_block[0])
         # call the kernel
@@ -121,6 +122,7 @@ class UCMTestCase(TestCase):
         ok_(np.max(err) < self.eps)
 
         xy_gpu = torch.zeros((self.sz[0], self.sz[1], 2), dtype=torch.float32, device='cuda')
+        assert xy_gpu.is_contiguous()
         # call the kernel
         test_project_gpufunc = self.module.get_function("projectTest")
         test_project_gpufunc(
@@ -179,6 +181,7 @@ class UCMTestCase(TestCase):
         planes_gpu[:] = cp.array(vplanes)
 
         xy_gpu = torch.zeros((self.num_planes, self.sz[0], self.sz[1], 2), dtype=torch.float32, device='cuda')
+        assert xy_gpu.is_contiguous()
         sz_block = 64, 16
         sz_grid = math.ceil((self.sz[0] * self.sz[1]) / sz_block[0]), math.ceil(self.num_planes / sz_block[1])
         # call the kernel
@@ -255,13 +258,16 @@ class DepthEstimationTestCase(TestCase):
         planes_has_neighbor_gpu[:] = cp.array(ps.planes_has_neighbor)
 
         D_gpu = torch.zeros((self.sz[0], self.sz[1]), dtype=torch.float32, device='cuda')
+        assert D_gpu.is_contiguous()
         sz_block = 32, 32
         sz_grid = math.ceil(self.sz[1] / sz_block[1]), math.ceil(self.sz[0] / sz_block[0])
 
         # upload indices
         indices_gpu = torch.tensor(indices, device=torch.device('cuda'))
+        assert indices_gpu.is_contiguous()
         rays_t = ps.rays.reshape(3, *self.sz)
-        rays_gpu = torch.tensor(rays_t.transpose(1, 2, 0), device=torch.device('cuda'))
+        rays_gpu = torch.tensor(rays_t.transpose(1, 2, 0), device=torch.device('cuda')).contiguous()
+        assert rays_gpu.is_contiguous()
 
         # call the kernel
         test_depth_gpufunc = self.module.get_function("getDepthTest")
@@ -281,7 +287,8 @@ class DepthEstimationTestCase(TestCase):
         ok_(np.max(err) < self.eps)
 
         # upload CV
-        CV_gpu = torch.tensor(ps.CV.transpose(2, 0, 1), device=torch.device('cuda'))
+        CV_gpu = torch.tensor(ps.CV.transpose(2, 0, 1), device=torch.device('cuda')).contiguous()
+        assert CV_gpu.is_contiguous()
 
         # call the kernel
         test_depth_gpufunc = self.module.get_function("getDepthWithSubpixelDirectTest")
