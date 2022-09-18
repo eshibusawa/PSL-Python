@@ -282,3 +282,11 @@ colormap_raw = np.array([
 [0.5156, 0.0, 0.0],
 [0.5, 0.0, 0.0]])
 colormap = np.fliplr(colormap_raw)
+
+def depth_to_colormap(depth, min_z, max_z):
+    mask = depth > 0
+    delta = 1/min_z - 1/max_z
+    index = np.round(np.maximum(0, np.minimum(1/(depth + 1E-6) - 1/max_z, delta) / delta) * 255).astype(np.int)
+    img = (colormap[index] * 255).astype(np.uint8)
+    img[~mask] = (0,0,0)
+    return img
