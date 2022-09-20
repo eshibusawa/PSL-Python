@@ -47,6 +47,7 @@ class plane_sweep_stereo():
         self.mask = None
         self.cams = None
         self.use_mask_indexed = False
+        self.use_mask_table = False
 
     def setup_calibration(self, cams, Rs, ts):
         self.cams = cams
@@ -116,6 +117,7 @@ class plane_sweep_stereo():
             normalizedCoords=0)
         self.to_mask = to_mask
         self.use_mask_indexed = False
+        self.use_mask_table = False
 
     def set_mask_indexed(self, mask):
         self.set_mask(mask)
@@ -124,17 +126,76 @@ class plane_sweep_stereo():
         index[:,:,1] = np.arange(0, mask.shape[0])[:,np.newaxis]
 
         index1d = index[mask != 0]
-        sz = math.ceil(math.sqrt(index1d.shape[0]))
-        index1dCeiled = np.empty((sz * sz, 2), dtype=np.int16)
-        index1dCeiled[0:index1d.shape[0],:] = index1d
-        index1dCeiled[index1d.shape[0]:,:] = -1
-        to_mask_indexed = texture.create_texture_object(index1dCeiled.reshape(sz, sz, 2),
+        sz1 = math.ceil(math.sqrt(index1d.shape[0] / self.num_planes) / 32) * 32
+        sz0 = math.ceil(index1d.shape[0] / sz1)
+        index1d_ceiled = np.empty((sz0 * sz1, 2), dtype=np.int16)
+        index1d_ceiled[0:index1d.shape[0],:] = index1d
+        index1d_ceiled[index1d.shape[0]:,:] = -1
+        mask_indexed = index1d_ceiled.reshape(sz0, sz1, 2)
+        to_mask_indexed = texture.create_texture_object(mask_indexed,
             filterMode=cp.cuda.runtime.cudaFilterModePoint,
             readMode=cp.cuda.runtime.cudaReadModeElementType,
             normalizedCoords=0)
         self.to_mask_indexed = to_mask_indexed
-        self.mask_indexed = index1dCeiled.reshape(sz, sz, 2)
+        self.mask_indexed = mask_indexed
         self.use_mask_indexed = True
+        self.use_mask_table = False
+
+    def set_mask_indexed_table(self, mask):
+        # compute rays
+        if self.rays is None:
+            self.cams[0].get_rays()
+            self.rays = self.cams[0].rays
+
+        self.set_mask_indexed(mask)
+        mask_length = cp.zeros(mask.shape, dtype=cp.uint32)
+        assert mask_length.flags.c_contiguous
+        sz_block = 32, 32
+        sz_grid = math.ceil(self.mask_indexed.shape[1] / sz_block[0]), math.ceil(self.mask_indexed.shape[0] / sz_block[1])
+        gpufunc = self.gpu_module.get_function('getMaskFromIndexed')
+        gpufunc(
+            block=sz_block,
+            grid=sz_grid,
+            args=(
+                mask_length,
+                self.to_mask_indexed,
+                mask_length.shape[0],
+                mask_length.shape[1],
+                self.mask_indexed.shape[0],
+                self.mask_indexed.shape[1]
+            )
+        )
+        cp.cuda.runtime.deviceSynchronize()
+        self.to_mask_length = texture.create_texture_object(mask_length,
+            filterMode=cp.cuda.runtime.cudaFilterModePoint,
+            readMode=cp.cuda.runtime.cudaReadModeElementType,
+            normalizedCoords=0)
+
+        table = cp.empty((self.mask_indexed.shape[0], self.mask_indexed.shape[1] * self.num_planes, 2), dtype=cp.int16)
+        assert table.flags.c_contiguous
+        sz_block = 64, 16
+        sz_grid = math.ceil(self.mask_indexed.shape[0] * self.mask_indexed.shape[1]/ sz_block[0]), math.ceil(self.num_planes / sz_block[1])
+        gpufunc = self.gpu_module.get_function('getTableFromIndexed')
+        gpufunc(
+            block=sz_block,
+            grid=sz_grid,
+            args=(
+                table,
+                self.rays,
+                self.to_mask_indexed,
+                mask_length.shape[0],
+                mask_length.shape[1],
+                self.mask_indexed.shape[0],
+                self.mask_indexed.shape[1]
+            )
+        )
+        cp.cuda.runtime.deviceSynchronize()
+        self.to_table = texture.create_texture_object(table,
+            filterMode=cp.cuda.runtime.cudaFilterModePoint,
+            readMode=cp.cuda.runtime.cudaReadModeElementType,
+            normalizedCoords=0)
+        self.use_mask_indexed = False
+        self.use_mask_table = True
 
     def get_xyz(self, img_ref, img_other):
         # compute rays
@@ -157,11 +218,29 @@ class plane_sweep_stereo():
             normalizedCoords=0)
 
         # compute point cloud
-        xyz = cp.empty((img_ref.shape[0], img_ref.shape[1], 3), dtype=cp.float32)
-        if self.use_mask_indexed:
-            xyz[:,:,0:2] = 0
-            xyz[:,:,2] = -1
-
+        xyz = cp.zeros((img_ref.shape[0], img_ref.shape[1], 3), dtype=cp.float32)
+        if self.use_mask_table:
+            sz_block = 32, 8
+            sz_grid = math.ceil(self.mask_indexed.shape[1] / sz_block[0]), math.ceil(self.mask_indexed.shape[0] / sz_block[1])
+            gpufunc = self.gpu_module.get_function('getXYZMaskIndexedTable')
+            gpufunc(
+                block=sz_block,
+                grid=sz_grid,
+                args=(
+                    xyz,
+                    self.rays,
+                    to_ref,
+                    to_other,
+                    self.to_mask_indexed,
+                    self.to_mask_length,
+                    self.to_table,
+                    xyz.shape[0],
+                    xyz.shape[1],
+                    self.mask_indexed.shape[0],
+                    self.mask_indexed.shape[1]
+                )
+            )
+        elif self.use_mask_indexed:
             sz_block = 16, 16
             sz_grid = math.ceil(self.mask_indexed.shape[1] / sz_block[0]), math.ceil(self.mask_indexed.shape[0] / sz_block[1])
             gpufunc = self.gpu_module.get_function('getXYZMaskIndexed')

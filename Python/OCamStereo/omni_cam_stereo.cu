@@ -169,3 +169,147 @@ extern "C" __global__ void getXYZMaskIndexed(
 	const int indexUV = indexU + indexV * width;
 	output[indexUV] = blockMatching(indexU, indexV, rays, texRef, texOther, texMask, height, width);
 }
+
+extern "C" __global__ void getMaskFromIndexed(
+	unsigned int* output,
+	cudaTextureObject_t texMaskIndexed,
+	int height,
+	int width,
+	int heightMask,
+	int widthMask
+	)
+{
+	const int indexS = blockIdx.x * blockDim.x + threadIdx.x;
+	const int indexT = blockIdx.y * blockDim.y + threadIdx.y;
+	if ((indexT >= heightMask) || (indexS >= widthMask))
+	{
+		return;
+	}
+	const short2 indexMask = tex2D<short2>(texMaskIndexed, indexS, indexT);
+	const int indexU = indexMask.x, indexV = indexMask.y;
+	if ((indexV < 0) || (indexU < 0))
+	{
+		return;
+	}
+	const int indexUV = indexU + indexV * width;
+	output[indexUV] = indexS + indexT * widthMask + 1;
+}
+
+extern "C" __global__ void getTableFromIndexed(
+	short2* output,
+	const float3* __restrict__ rays,
+	cudaTextureObject_t texMaskIndexed,
+	int height,
+	int width,
+	int heightMask,
+	int widthMask
+	)
+{
+	const int indexST = blockIdx.x * blockDim.x + threadIdx.x;
+	const int indexP = blockIdx.y * blockDim.y + threadIdx.y;
+	const int indexS = indexST % widthMask, indexT = indexST / widthMask;
+	if ((indexT >= heightMask) || (indexS >= widthMask) || (indexP >= NUM_PLANES))
+	{
+		return;
+	}
+	const short2 indexMask = tex2D<short2>(texMaskIndexed, indexS, indexT);
+	const int indexU = indexMask.x, indexV = indexMask.y;
+	if ((indexV < 0) || (indexU < 0))
+	{
+		return;
+	}
+	const int indexUV = indexU + indexV * width;
+	float3 xyz_other = apply3x3Transformation(g_H[indexP], rays[indexUV]);
+	float2 uv_other = OmniCameraModel::project(xyz_other, g_K_other);
+	const int index = indexP + (indexS * NUM_PLANES) + (indexT * widthMask * NUM_PLANES);
+	output[index].x = static_cast<short>(uv_other.x * 16);
+	output[index].y = static_cast<short>(uv_other.y * 16);
+}
+
+float3 __device__ blockMatchingTable(
+	const int indexU,
+	const int indexV,
+	const float3 ray,
+	cudaTextureObject_t texRef,
+	cudaTextureObject_t texOther,
+	cudaTextureObject_t texMaskLength,
+	cudaTextureObject_t texMaskTable,
+	int height,
+	int width,
+	int heightMask,
+	int widthMask
+	)
+{
+	unsigned char patch_ref[MATCH_WINDOW_WIDTH * MATCH_WINDOW_HEIGHT];
+	unsigned char patch_other[MATCH_WINDOW_WIDTH * MATCH_WINDOW_HEIGHT];
+	float minCost = (1UL << 31), cost = 0.f;
+	int minIndexP = 0;
+	for (int indexP = 0; indexP < NUM_PLANES; indexP++)
+	{
+		for (int j = -MATCH_WINDOW_RADIUS_V, k = 0; j <= MATCH_WINDOW_RADIUS_V; j++)
+		{
+			for (int i = -MATCH_WINDOW_RADIUS_H; i <= MATCH_WINDOW_RADIUS_H; i++)
+			{
+				const int indexL = tex2D<unsigned int>(texMaskLength, indexU + i, indexV + j);
+				if (indexL == 0)
+				{
+					patch_ref[k] = 0;
+					patch_other[k] = 255;
+					k++;
+					continue;
+				}
+
+				patch_ref[k] = tex2D<unsigned char>(texRef, indexU + i, indexV + j);
+				const int indexS2 = (indexL - 1) % widthMask, indexT2 = (indexL - 1) / widthMask;
+				short2 uv_other2 = tex2D<short2>(texMaskTable, NUM_PLANES * indexS2 + indexP, indexT2);
+				float val_other = tex2D<float>(texOther, 0.0625f * uv_other2.x, 0.0625f * uv_other2.y);
+				patch_other[k] = static_cast<unsigned char>(255 * val_other);
+				k++;
+			}
+		}
+		cost = ZNCCCostFunction(patch_ref, patch_other);
+
+		if (cost < minCost)
+		{
+			minCost = cost;
+			minIndexP = indexP;
+		}
+	}
+
+	float d = getDepthFromRayAndPlane(ray, g_nd[minIndexP]);
+	float3 output;
+	output.x = d * ray.x / ray.z;
+	output.y = d * ray.y / ray.z;
+	output.z = d;
+	return output;
+}
+
+extern "C" __global__ void getXYZMaskIndexedTable(
+	float3* output,
+	const float3* __restrict__ rays,
+	cudaTextureObject_t texRef,
+	cudaTextureObject_t texOther,
+	cudaTextureObject_t texMaskIndexed,
+	cudaTextureObject_t texMaskLength,
+	cudaTextureObject_t texMaskTable,
+	int height,
+	int width,
+	int heightMask,
+	int widthMask
+	)
+{
+	const int indexS = blockIdx.x * blockDim.x + threadIdx.x;
+	const int indexT = blockIdx.y * blockDim.y + threadIdx.y;
+	if ((indexT >= heightMask) || (indexS >= widthMask))
+	{
+		return;
+	}
+	const short2 indexMask = tex2D<short2>(texMaskIndexed, indexS, indexT);
+	const int indexU = indexMask.x, indexV = indexMask.y;
+	if ((indexV < 0) || (indexU < 0))
+	{
+		return;
+	}
+	const int indexUV = indexU + indexV * width;
+	output[indexUV] = blockMatchingTable(indexU, indexV, rays[indexUV], texRef, texOther, texMaskLength, texMaskTable, height, width, heightMask, widthMask);
+}
