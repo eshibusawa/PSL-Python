@@ -32,37 +32,27 @@ import add_path
 from util_cuda import upload_constant
 import texture
 
-class OmniCam():
+class EquidistantCam():
     def __init__(self, p):
-        self.sz, self.u0v0, self.affine, self.invserse_affine, self.polynomial, self.inverse_polynomial = self.get_parameters(p)
+        self.f = p[0]
+        self.u0 = p[1]
+        self.v0 = p[2]
         self.gpu_module = None
         self.rays = None
         self.mask = None
-
-    @staticmethod
-    def get_parameters(p):
-        sz = int(p[1]), int(p[0])
-        affine = np.array([[1, p[10]], [p[11], p[9]]], dtype=np.float32)
-        inverse_affine = np.linalg.solve(affine, np.eye(2)).astype(np.float32)
-        polynomial = -p[6:1:-1]
-        inverse_polynomal = p[12:][::-1]
-        u0v0 = p[7:9]
-
-        return sz, u0v0, affine, inverse_affine, polynomial, inverse_polynomal
+        self.sz = None
 
     def get_intrincs_array(self):
         p = list()
-        p.append(self.u0v0)
-        p.append(self.affine.reshape(-1))
-        p.append(self.invserse_affine.reshape(-1))
-        p.append(self.inverse_polynomial)
-        p.append(self.polynomial)
+        p.append(self.u0)
+        p.append(self.v0)
+        p.append(self.f)
         return np.hstack(p)
 
     def compile_module(self):
         dn = os.path.dirname(__file__)
         fnl = list()
-        fnl.append(os.path.join(dn, 'omni_cam.cuh'))
+        fnl.append(os.path.join(dn, 'equidistant_cam.cuh'))
         fnl.append(os.path.join(dn, 'omni_cam.cu'))
 
         cuda_source = None
@@ -74,14 +64,13 @@ class OmniCam():
             else:
                 cuda_source += cs
 
-        cuda_source = cuda_source.replace('OC_POLYNOMIAL_COEF_NUM', str(self.polynomial.shape[0]))
-        cuda_source = cuda_source.replace('OC_INVERSE_POLYNOMIAL_COEF_NUM', str(self.inverse_polynomial.shape[0]))
+        cuda_source = cuda_source.replace('OmniCameraModel', 'EquidistantCameraModel')
 
         self.gpu_module = cp.RawModule(code=cuda_source)
         self.gpu_module.compile()
 
     def check_alignment(self):
-        offset_array = cp.empty(6, dtype=cp.int32)
+        offset_array = cp.empty(3, dtype=cp.int32)
         gpu_func = self.gpu_module.get_function('getIntrinsicSize')
         sz_block = 1, 1
         sz_grid = 1, 1
@@ -98,13 +87,6 @@ class OmniCam():
         assert o == offset_array[1]
         o += 2
         assert o == offset_array[2]
-        o += 4
-        assert o == offset_array[3]
-        o += 4
-        assert o == offset_array[4]
-        o += self.inverse_polynomial.shape[0]
-        assert o == offset_array[5]
-
 
     def setup_module(self):
         if self.gpu_module is None:
@@ -112,8 +94,10 @@ class OmniCam():
         self.check_alignment()
         upload_constant(self.gpu_module, self.get_intrincs_array(), 'g_K_ref')
 
-    def get_rays(self):
-        rays = cp.empty((self.sz[0], self.sz[1], 3), dtype=cp.float32)
+    def get_rays(self, sz = None):
+        if sz is None:
+            sz = self.sz
+        rays = cp.empty((sz[0], sz[1], 3), dtype=cp.float32)
         assert rays.flags.c_contiguous
 
         gpu_func = self.gpu_module.get_function('getRays')
@@ -154,8 +138,18 @@ class OmniCam():
         cp.cuda.runtime.deviceSynchronize()
         self.thetas = thetas
 
-    def create_default_mask(self):
-        mask = cp.full((self.sz[0], self.sz[1]), 1, dtype=cp.uint8)
+    def create_default_mask(self, sz = None):
+        if sz is None:
+            sz = self.sz
+        mask = cp.full((sz[0], sz[1]), 1, dtype=cp.uint8)
+        to_mask = texture.create_texture_object(cp.asarray(mask),
+            addressMode = cp.cuda.runtime.cudaAddressModeBorder,
+            filterMode = cp.cuda.runtime.cudaFilterModePoint,
+            readMode = cp.cuda.runtime.cudaReadModeElementType)
+        self.mask = mask
+        self.to_mask = to_mask
+
+    def set_mask(self, mask):
         to_mask = texture.create_texture_object(cp.asarray(mask),
             addressMode = cp.cuda.runtime.cudaAddressModeBorder,
             filterMode = cp.cuda.runtime.cudaFilterModePoint,
@@ -165,9 +159,9 @@ class OmniCam():
 
     def get_xyz_from_distance(self, D):
         if self.rays is None:
-            self.get_rays()
+            self.get_rays(D.shape[:2])
         if self.mask is None:
-            self.create_default_mask()
+            self.create_default_mask(D.shape[:2])
         assert D.shape == self.rays.shape[:2]
 
         xyz = cp.empty_like(self.rays)
