@@ -195,6 +195,41 @@ extern "C" __global__ void getMaskFromIndexed(
 	output[indexUV] = indexS + indexT * widthMask + 1;
 }
 
+extern "C" __global__ void getTable(
+	short2* output,
+	const float3* __restrict__ rays,
+	cudaTextureObject_t texMask,
+	int height,
+	int width
+	)
+{
+	const int indexU = blockIdx.x * blockDim.x + threadIdx.x;
+	const int indexV = blockIdx.y * blockDim.y + threadIdx.y;
+	if ((indexV >= height) || (indexU >= width))
+	{
+		return;
+	}
+    if (tex2D<unsigned char>(texMask, indexU, indexV) == 0)
+	{
+		for (int indexP = 0; indexP < NUM_PLANES; indexP++)
+		{
+			const int index = indexP + (indexU * NUM_PLANES) + (indexV * width * NUM_PLANES);
+			output[index] = make_short2(-1, -1);
+		}
+		return;
+	}
+	const int indexUV = indexU + indexV * width;
+
+	for (int indexP = 0; indexP < NUM_PLANES; indexP++)
+	{
+		float3 xyz_other = apply3x3Transformation(g_H[indexP], rays[indexUV]);
+		float2 uv_other = OmniCameraModel::project(xyz_other, g_K_other);
+		const int index = indexP + (indexU * NUM_PLANES) + (indexV * width * NUM_PLANES);
+		output[index].x = static_cast<short>(uv_other.x * 16);
+		output[index].y = static_cast<short>(uv_other.y * 16);
+	}
+}
+
 extern "C" __global__ void getTableFromIndexed(
 	short2* output,
 	const float3* __restrict__ rays,

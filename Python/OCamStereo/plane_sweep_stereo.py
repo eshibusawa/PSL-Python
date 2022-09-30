@@ -25,6 +25,7 @@
 import os
 import math
 
+import cv2
 import numpy as np
 import cupy as cp
 
@@ -48,6 +49,7 @@ class plane_sweep_stereo():
         self.cams = None
         self.use_mask_indexed = False
         self.use_mask_table = False
+        self.use_ocam = True
 
     def setup_calibration(self, cams, Rs, ts):
         self.cams = cams
@@ -67,7 +69,10 @@ class plane_sweep_stereo():
         fnl = list()
         fnl.append(os.path.join(dn_psl, 'warping.cuh'))
         fnl.append(os.path.join(dn_psl, 'depth.cuh'))
-        fnl.append(os.path.join(dn, 'omni_cam.cuh'))
+        if self.use_ocam:
+            fnl.append(os.path.join(dn, 'omni_cam.cuh'))
+        else:
+            fnl.append(os.path.join(dn, 'equidistant_cam.cuh'))
         fnl.append(os.path.join(dn, 'omni_cam_stereo.cu'))
 
         cuda_source = None
@@ -79,8 +84,12 @@ class plane_sweep_stereo():
             else:
                 cuda_source += cs
 
-        cuda_source = cuda_source.replace('OC_POLYNOMIAL_COEF_NUM', str(self.cams[1].polynomial.shape[0]))
-        cuda_source = cuda_source.replace('OC_INVERSE_POLYNOMIAL_COEF_NUM', str(self.cams[1].inverse_polynomial.shape[0]))
+        if self.use_ocam:
+            cuda_source = cuda_source.replace('OC_POLYNOMIAL_COEF_NUM', str(self.cams[1].polynomial.shape[0]))
+            cuda_source = cuda_source.replace('OC_INVERSE_POLYNOMIAL_COEF_NUM', str(self.cams[1].inverse_polynomial.shape[0]))
+        else:
+            cuda_source = cuda_source.replace('OmniCameraModel', 'EquidistantCameraModel')
+
         cuda_source = cuda_source.replace('MATCH_WINDOW_WIDTH', str(self.match_window_width))
         cuda_source = cuda_source.replace('MATCH_WINDOW_HEIGHT', str(self.match_window_height))
         cuda_source = cuda_source.replace('NUM_PLANES', str(self.num_planes))
@@ -108,6 +117,34 @@ class plane_sweep_stereo():
         Ps[:,0:3] = n.T
         Ps[:,3] = ds.T
         upload_constant(self.gpu_module, Ps.reshape(-1), 'g_nd')
+
+    def get_table(self):
+        # compute rays
+        if self.rays is None:
+            self.cams[0].get_rays()
+            self.rays = self.cams[0].rays
+        if self.to_mask is None:
+            return None
+
+        table = cp.empty((self.rays.shape[0], self.rays.shape[1], self.num_planes, 2), dtype=cp.int16)
+        assert table.flags.c_contiguous
+        sz_block = 32, 32
+        sz_grid = math.ceil(table.shape[1] / sz_block[0]), math.ceil(table.shape[0] / sz_block[1])
+        gpufunc = self.gpu_module.get_function('getTable')
+        gpufunc(
+            block=sz_block,
+            grid=sz_grid,
+            args=(
+                table,
+                self.rays,
+                self.to_mask,
+                table.shape[0],
+                table.shape[1],
+            )
+        )
+        cp.cuda.runtime.deviceSynchronize()
+        self.table = table
+        return table
 
     def set_mask(self, mask):
         self.mask = mask
@@ -280,3 +317,25 @@ class plane_sweep_stereo():
         cp.cuda.runtime.deviceSynchronize()
 
         return xyz
+
+def draw_trajectories(imgs, table_gpu, points):
+    if len(imgs[0].shape) == 3:
+        imgs_draw = np.copy(imgs[0]), np.copy(imgs[1])
+    else:
+        imgs_draw = cv2.cvtColor(imgs[0], cv2.COLOR_GRAY2BGR), cv2.cvtColor(imgs[1], cv2.COLOR_GRAY2BGR)
+
+    for p in points:
+        cv2.circle(imgs_draw[0], (int(p[0]), int(p[1])), 5, (255, 255, 0))
+        trajectory = table_gpu[int(p[1]), int(p[0]), :, :].get()
+        pt_prev = None
+        for pt in trajectory:
+            if (pt[0] < 0) or (pt[1] < 0):
+                pt_prev = None
+                continue
+            pt = int(pt[0]/16), int(pt[1]/16)
+            # cv2.circle(imgs_draw[1], (pt[0], pt[1]), 15, (255, 255, 0), 1)
+            if pt_prev is not None:
+                cv2.line(imgs_draw[1], (pt_prev[0], pt_prev[1]), (pt[0], pt[1]), (127, 127, 0), 1)
+            pt_prev = pt
+
+    return imgs_draw

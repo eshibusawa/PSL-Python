@@ -81,9 +81,9 @@ class dataset_loader():
         return img2, img3
 
     def load_vector_field(self, id):
-        fpfn_transation = self.fn_xmls[id].replace('.xml', '.flo').replace('calib', 'translationVector')
-        transation_vector = cv2.readOpticalFlow(fpfn_transation)
+        fpfn_translation = self.fn_xmls[id].replace('.xml', '.flo').replace('calib', 'translationVector')
+        translation_vector = cv2.readOpticalFlow(fpfn_translation)
         fpfn_calibration = self.fn_xmls[id].replace('.xml', '.flo').replace('calib', 'calibrationVector')
         calibration_vector = cv2.readOpticalFlow(fpfn_calibration)
 
-        return transation_vector, calibration_vector
+        return translation_vector, calibration_vector
