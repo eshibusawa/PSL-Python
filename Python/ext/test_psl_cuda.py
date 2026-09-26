@@ -26,7 +26,6 @@ import os
 import math
 
 from unittest import TestCase
-from nose.tools import ok_
 
 import numpy as np
 import cupy as cp
@@ -90,7 +89,7 @@ class UCMTestCase(TestCase):
     def tearDown(self):
         pass
 
-    def unproject_project_test(self):
+    def test_unproject_project(self):
         xy_ref = np.empty((2, self.sz[0], self.sz[1]), dtype=np.float32)
         xy_ref[0, :,:] = np.arange(0, self.sz[1])[np.newaxis,:]
         xy_ref[1, :,:] = np.arange(0, self.sz[0])[:,np.newaxis]
@@ -119,7 +118,7 @@ class UCMTestCase(TestCase):
         xyz = xyz_t.transpose(2, 0, 1).reshape(3, -1)
         # evaluate error
         err = np.abs(xyz - xyz_ref)
-        ok_(np.max(err) < self.eps)
+        assert np.max(err) < self.eps
 
         xy_gpu = torch.zeros((self.sz[0], self.sz[1], 2), dtype=torch.float32, device='cuda')
         assert xy_gpu.is_contiguous()
@@ -138,9 +137,9 @@ class UCMTestCase(TestCase):
         xy = xy_t.transpose(2, 0, 1)
         # evaluate error
         err = np.abs(xy - xy_ref)
-        ok_(np.max(err) < self.eps_reproj)
+        assert np.max(err) < self.eps_reproj
 
-    def compute_warping_map_test(self):
+    def test_compute_warping_map(self):
         # compute reference map
         ps = psl()
         ps.num_planes = self.num_planes
@@ -198,7 +197,7 @@ class UCMTestCase(TestCase):
         xy = xy_t.transpose(0, 3, 1, 2)
         # evaluate error
         err = np.abs(xy - np.array(xy_ref))
-        ok_(np.max(err) < self.eps_reproj)
+        assert np.max(err) < self.eps_reproj
 
 class DepthEstimationTestCase(TestCase):
     def setUp(self):
@@ -236,7 +235,7 @@ class DepthEstimationTestCase(TestCase):
     def tearDown(self):
         pass
 
-    def depth_estimation_test(self):
+    def test_depth_estimation(self):
         ps = psl()
         ps.num_planes = self.num_planes
         ps.generate_planes()
@@ -284,7 +283,7 @@ class DepthEstimationTestCase(TestCase):
         D_ref = ps.get_depth_from_planes(indices)
         D = D_gpu.to('cpu').numpy()
         err = np.abs(D - D_ref)
-        ok_(np.max(err) < self.eps)
+        assert np.max(err) < self.eps
 
         # upload CV
         CV_gpu = torch.tensor(ps.CV.transpose(2, 0, 1), device=torch.device('cuda')).contiguous()
@@ -307,7 +306,7 @@ class DepthEstimationTestCase(TestCase):
         D_ref = ps.get_depth_from_planes(indices)
         D = D_gpu.to('cpu').numpy()
         err = np.abs(D - D_ref)
-        ok_(np.max(err) < self.eps)
+        assert np.max(err) < self.eps
 
         # call the kernel
         test_depth_gpufunc = self.module.get_function("getDepthWithSubpixelInverseTest")
@@ -326,4 +325,4 @@ class DepthEstimationTestCase(TestCase):
         D_ref = ps.get_depth_from_planes(indices)
         D = D_gpu.to('cpu').numpy()
         err = np.abs(D - D_ref)
-        ok_(np.max(err) < self.eps)
+        assert np.max(err) < self.eps

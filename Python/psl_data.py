@@ -44,12 +44,12 @@ class psl_data():
             K[1,1] = line[3]
             K[1,2] = line[4]
             xi = float(line[5])
-            ks = np.array([line[6], line[7]], dtype=np.float)
-            ps = np.array([line[8], line[9]], dtype=np.float)
+            ks = np.array([line[6], line[7]], dtype=float)
+            ps = np.array([line[8], line[9]], dtype=float)
 
             line = f.readline().split(' ')
-            R = np.empty((3, 3), dtype=np.float)
-            C = np.empty((3, 1), dtype=np.float)
+            R = np.empty((3, 3), dtype=float)
+            C = np.empty((3, 1), dtype=float)
             for j in range(0, 3):
                 line = f.readline().split(' ')
                 R[j, 0] = line[0]
@@ -84,7 +84,7 @@ class psl_data():
             Ry, _ = cv2.Rodrigues(np.array([0, float(l[2]), 0]))
             Rx, _ = cv2.Rodrigues(np.array([float(l[3]), 0, 0]))
             R.append(np.dot(Rz, np.dot(Ry, Rx)))
-            T.append(np.array([l[4], l[5], l[6]], dtype=np.float))
+            T.append(np.array([l[4], l[5], l[6]], dtype=float))
 
         system_R = np.array(R)
         system_T = np.array(T)[:,:,np.newaxis]
@@ -96,8 +96,8 @@ class psl_data():
 
     def get_world_to_camera_pose(self):
         # Xc = Rc * Xg - Tc
-        self.Rs = np.empty((self.system_R.shape[0], 3, 3), dtype=np.float)
-        self.Ts = np.empty((self.system_T.shape[0], 3, 1), dtype=np.float)
+        self.Rs = np.empty((self.system_R.shape[0], 3, 3), dtype=float)
+        self.Ts = np.empty((self.system_T.shape[0], 3, 1), dtype=float)
         for R, T, k in zip(self.system_R, self.system_T, range(0, self.system_R.shape[0])):
             self.Rs[k] = np.dot(self.R.T, R.T)
             self.Ts[k] = -np.dot(self.Rs[k], T) - np.dot(self.R.T, self.C)

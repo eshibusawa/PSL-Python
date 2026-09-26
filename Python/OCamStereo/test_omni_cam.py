@@ -26,7 +26,6 @@ import os
 import math
 
 from unittest import TestCase
-from nose.tools import ok_
 
 import numpy as np
 import cupy as cp
@@ -76,7 +75,7 @@ class OmniCamTestCase(TestCase):
     def tearDown(self):
         pass
 
-    def unproject_project_test(self):
+    def test_unproject_project(self):
         xyz_gpu = cp.zeros((self.sz[0], self.sz[1], 3), dtype=cp.float32)
         sz_block = 32, 32
         sz_grid = math.ceil(self.sz[1] / sz_block[0]), math.ceil(self.sz[0] / sz_block[1])
@@ -91,7 +90,7 @@ class OmniCamTestCase(TestCase):
         xyz0_ref = np.array([0.733011271294813, 0.549758453471110, 0.400574735838165])
         xyz0 = xyz_gpu[300, 400, :]
         err = np.abs(xyz0_ref - xyz0.get())
-        ok_(np.max(err) < self.eps_back_projection)
+        assert np.max(err) < self.eps_back_projection
 
         xyz_gpu = cp.array([1.0, 1.0, -1.0], dtype=cp.float32)[cp.newaxis, cp.newaxis, :]
         xy_gpu = cp.zeros((xyz_gpu.shape[0], xyz_gpu.shape[1], 2), dtype=cp.float32)
@@ -108,4 +107,4 @@ class OmniCamTestCase(TestCase):
         )
         xy_ref = np.array([4.729118411664447e+02, 3.929118411664447e+02], dtype=np.float32)[np.newaxis, np.newaxis, :]
         err = np.abs(xy_ref - xy_gpu.get())
-        ok_(np.max(err) < self.eps_projection)
+        assert np.max(err) < self.eps_projection

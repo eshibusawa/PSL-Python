@@ -63,7 +63,7 @@ class unified_camera():
         return xy
 
     def unproject_rays(self, sz):
-        xy = np.empty((2, sz[0], sz[1]), dtype=np.float)
+        xy = np.empty((2, sz[0], sz[1]), dtype=float)
         xy[0,:,:] = np.arange(0, sz[1])[np.newaxis,:]
         xy[1,:,:] = np.arange(0, sz[0])[:,np.newaxis]
         xy = xy.reshape(2, -1)

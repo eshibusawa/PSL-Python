@@ -76,9 +76,9 @@ class plane_sweep():
 
     def generate_planes(self):
         # front parallel
-        fp_planes = np.zeros((4, self.num_planes), dtype=np.float)
+        fp_planes = np.zeros((4, self.num_planes), dtype=float)
         fp_planes[2, :] = -1
-        fp_planes_has_neighbor = np.full(self.num_planes, True, dtype=np.bool)
+        fp_planes_has_neighbor = np.full(self.num_planes, True, dtype=bool)
         fp_planes_has_neighbor[0] = fp_planes_has_neighbor[-1] = False
         fp_planes[3, :] = plane_sweep.generate_depth(self.near_z, self.far_z, self.num_planes, self.plane_generation_mode)
         self.planes = fp_planes
@@ -86,10 +86,10 @@ class plane_sweep():
 
         # ground
         if self.ground_plane_enabled:
-            g_planes = np.zeros((4, self.num_ground), dtype=np.float)
+            g_planes = np.zeros((4, self.num_ground), dtype=float)
             g_planes[1, :] = -1
             g_planes[3, :] = plane_sweep.generate_depth(self.near_y, self.far_y, self.num_ground, self.plane_generation_mode)
-            g_planes_has_neighbor = np.full(self.num_ground, True, dtype=np.bool)
+            g_planes_has_neighbor = np.full(self.num_ground, True, dtype=bool)
             g_planes_has_neighbor[0] = g_planes_has_neighbor[-1] = False
             self.planes = np.hstack((self.planes, g_planes))
             self.planes_has_neighbor = np.hstack((self.planes_has_neighbor, g_planes_has_neighbor))
@@ -158,7 +158,7 @@ class plane_sweep():
             cost_function = ad_cost(self.imgs[ref], n_planes, (self.match_window_width, self.match_window_height), self.box_filer_ad_enabled, scale=accumlation_scale)
 
         if n_imgs == 2: # stereo case
-            self.mask = np.zeros((sz_img[0], sz_img[1], n_planes), np.bool)
+            self.mask = np.zeros((sz_img[0], sz_img[1], n_planes), bool)
 
         rays = self.cams[ref].unproject_rays(sz_img)
         for k in range(0, n_imgs):
@@ -190,7 +190,7 @@ class plane_sweep():
         if (self.planes is None) or (self.rays is None):
             return None
 
-        xy = np.empty((2, self.rays.shape[1]), dtype=np.float)
+        xy = np.empty((2, self.rays.shape[1]), dtype=float)
         xy[0] = self.rays[0,:] / self.rays[2,:]
         xy[1] = self.rays[1,:] / self.rays[2,:]
 

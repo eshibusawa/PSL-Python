@@ -9,7 +9,7 @@ OcamStereo is full GPU implementation based on the PSL-Python.
 ***OcamStereo*** requires the following libraries:
 + cupy
 + opencv
-+ nose (only for testing)
++ pytest (only for testing)
 + open3d (only for visualization)
 
 ## Usage

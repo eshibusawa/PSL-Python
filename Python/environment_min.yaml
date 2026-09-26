@@ -1,0 +1,12 @@
+name: psl-20260926
+channels:
+  - conda-forge
+dependencies:
+  - cuda-version=12.9 # selects the CUDA 12.9 build of cupy and pytorch
+  - cupy
+  - kornia
+  - open3d
+  - py-opencv
+  - pytest
+  - python=3.12.*
+  - pytorch=*=cuda*
