@@ -25,6 +25,11 @@
 import torch
 import kornia.filters
 
+def box_blur(x, kernel_size, normalized):
+    # kornia.filters.box_blur always normalizes, so scale by the window area to get the sum
+    y = kornia.filters.box_blur(x, kernel_size, border_type='replicate')
+    return y if normalized else y * (kernel_size[0] * kernel_size[1])
+
 class absolute_difference():
     def __init__(self, img_ref, kernel_size = (7, 7), box_filter_enabled = True, use_batch = True):
         self.img_ref = img_ref
@@ -32,7 +37,7 @@ class absolute_difference():
         self.kernel_size = kernel_size
         self.box_filter_enabled = box_filter_enabled
         self.precision = torch.float16
-        self.box_filter = (lambda x: kornia.filters.box_blur(x, self.kernel_size, border_type='replicate', normalized=False))
+        self.box_filter = (lambda x: box_blur(x, self.kernel_size, False))
 
     def get_cost_volume(self, warped_images):
         if self.use_batch:
@@ -65,7 +70,7 @@ class zero_mean_absolute_difference():
         self.box_filter_enabled = box_filter_enabled
         self.precision = torch.float16
         self.img_ref = img_ref.to(self.precision)
-        self.box_filter = (lambda x, f: kornia.filters.box_blur(x, self.kernel_size, border_type='replicate', normalized=f))
+        self.box_filter = (lambda x, f: box_blur(x, self.kernel_size, f))
         img_ref2 = img_ref[None, None, :]
         self.img_box = img_ref2 - self.box_filter(img_ref2.to(self.precision), True)
 
@@ -101,7 +106,7 @@ class zero_mean_normalized_cross_correlation():
         self.use_batch = use_batch
         self.eps = 1E-7
         self.precision = torch.float32
-        self.box_filter = (lambda x, f: kornia.filters.box_blur(x, self.kernel_size, border_type='replicate', normalized=f))
+        self.box_filter = (lambda x, f: box_blur(x, self.kernel_size, f))
         img_ref2 = img_ref[None, None, :]
         self.img_box = img_ref2 - self.box_filter(img_ref2.to(self.precision), True)
         self.img_sqr_box = self.box_filter(self.img_box * self.img_box, False)
@@ -140,7 +145,7 @@ class normalized_cross_correlation():
         self.use_batch = use_batch
         self.eps = 1E-7
         self.precision = torch.float32
-        self.box_filter = (lambda x: kornia.filters.box_blur(x, self.kernel_size, border_type='replicate', normalized=False))
+        self.box_filter = (lambda x: box_blur(x, self.kernel_size, False))
         self.img_ref = img_ref.to(self.precision)[None, None, :]
         self.img_sqr_box = self.box_filter(self.img_ref * self.img_ref)
 

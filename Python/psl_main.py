@@ -26,6 +26,7 @@ import cv2
 
 import psl as py_psl
 from psl_data import psl_data
+from colormap import depth_to_colormap
 from unified_camera import unified_camera as ucm
 
 if __name__ == '__main__':
@@ -62,5 +63,5 @@ if __name__ == '__main__':
         pyps.add_image(uc_new, Rs[k], Ts[k], imgs[k])
 
     D = pyps.get_depth(0)
-    Dimg = py_psl.depth_to_colormap(D, pyps.near_z, pyps.far_z)
+    Dimg = depth_to_colormap(D, pyps.near_z, pyps.far_z)
     cv2.imwrite('depth.png', Dimg)

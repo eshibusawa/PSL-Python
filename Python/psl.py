@@ -237,7 +237,6 @@ class plane_sweep():
     def get_depth(self, ref = 0):
         try:
             import torch
-            import psl_cuda as py_psl_cuda
         except ImportError:
             self.use_gpu = False
 
@@ -278,7 +277,7 @@ class plane_sweep():
             t_Ks = torch.tensor(np.array(Ks), dtype=torch.float32, device=torch.device('cuda'))
 
         t_imgs = torch.tensor(np.array(self.imgs), device=torch.device('cuda'))
-        t_Ps = torch.tensor(self.planes.T, dtype=torch.float32, device=torch.device('cuda'))
+        t_Ps = torch.tensor(self.planes.T, dtype=torch.float32, device=torch.device('cuda')).contiguous()
         t_Rs = torch.tensor(np.array(self.Rs), dtype=torch.float32, device=torch.device('cuda'))
         t_Ts = torch.tensor(np.array(self.Ts), dtype=torch.float32, device=torch.device('cuda'))
 
