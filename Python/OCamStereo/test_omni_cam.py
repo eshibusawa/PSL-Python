@@ -44,7 +44,7 @@ class OmniCamTestCase(TestCase):
         oc = omni_cam.OmniCam(reference_param)
 
         dn = os.path.dirname(os.path.realpath(__file__))
-        dn_psl = os.path.join(os.path.dirname(dn), 'ext')
+        dn_psl = os.path.join(os.path.join(os.path.join(os.path.dirname(dn), 'PSL')), 'ext')
         sources = list()
         sources.append(os.path.join(dn, 'omni_cam.cuh'))
         sources.append(os.path.join(dn_psl, 'project_unproject_unit_test.cu'))

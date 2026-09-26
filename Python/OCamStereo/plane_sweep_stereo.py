@@ -64,7 +64,7 @@ class plane_sweep_stereo():
         assert self.cams is not None
 
         dn = os.path.dirname(__file__)
-        dn_psl = os.path.join(os.path.dirname(dn), 'ext')
+        dn_psl = os.path.join(os.path.dirname(dn), os.path.join('PSL', 'ext'))
 
         fnl = list()
         fnl.append(os.path.join(dn_psl, 'warping.cuh'))

@@ -1,6 +1,6 @@
 # PSL-Python
 ***PSL-Python*** is a Python implementation of plane sweep stereo [1] for fisheye images with the unified camera model [2].
-The matching costs (SAD, ZSAD, NCC and ZNCC) are computed on the CPU with NumPy or on the GPU with CuPy and PyTorch.
+The matching costs (SAD, ZSAD, NCC and ZNCC) are computed on the CPU with NumPy or on the GPU with CuPy.
 
 [OCamStereo](./Python/OCamStereo/README.md) is a full GPU implementation with the omni camera model based on PSL-Python.
 
@@ -13,8 +13,6 @@ The grayscale reference image (left) and the depth map computed with ZNCC from 5
 ***PSL-Python*** requires an NVIDIA GPU with a CUDA driver and conda (Miniconda / Anaconda).
 The following libraries are installed from conda by [Python/environment_min.yaml](./Python/environment_min.yaml):
 + cupy
-+ pytorch
-+ kornia
 + opencv
 + open3d (only for visualization of OCamStereo)
 + pytest (only for testing)

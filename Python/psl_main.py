@@ -24,6 +24,7 @@
 
 import cv2
 
+import add_path
 import psl as py_psl
 from psl_data import psl_data
 from colormap import depth_to_colormap
