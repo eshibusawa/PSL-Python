@@ -32,7 +32,7 @@ import add_path
 from omni_cam import OmniCam
 from multi_fov_dataset import dataset_loader
 from plane_sweep_stereo import plane_sweep_stereo
-from colormap import depth_to_colormap
+from colormap import colormap_turbo, depth_to_colormap
 
 loader = dataset_loader('/path/to/vfr_fisheye')
 id_img_ref = 1
@@ -87,7 +87,7 @@ gimg_other = cv2.cvtColor(img_other, cv2.COLOR_BGR2GRAY)
 xyz = ps.get_xyz(gimg_ref, gimg_other)
 
 # write depth color map
-Dimg = depth_to_colormap(xyz[:,:,2].get(), ps.near_z, ps.far_z)
+Dimg = depth_to_colormap(xyz[:,:,2].get(), ps.near_z, ps.far_z, colormap_turbo)
 cv2.imwrite('depth.png', Dimg)
-Dimg_ref = depth_to_colormap(xyz_ref[:,:,2], ps.near_z, ps.far_z)
+Dimg_ref = depth_to_colormap(xyz_ref[:,:,2], ps.near_z, ps.far_z, colormap_turbo)
 cv2.imwrite('depth_ref.png', Dimg_ref)

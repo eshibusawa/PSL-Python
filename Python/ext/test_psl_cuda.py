@@ -29,7 +29,6 @@ from unittest import TestCase
 
 import numpy as np
 import cupy as cp
-import torch
 
 import add_path
 from unified_camera import unified_camera as ucm
@@ -100,8 +99,8 @@ class UCMTestCase(TestCase):
         intrinsics_gpu = cp.ndarray(self.intrinsics.shape, cp.float32, K_ptr)
         intrinsics_gpu[:] = cp.array(self.intrinsics)
 
-        xyz_gpu = torch.zeros((self.sz[0], self.sz[1], 3), dtype=torch.float32, device='cuda')
-        assert xyz_gpu.is_contiguous()
+        xyz_gpu = cp.zeros((self.sz[0], self.sz[1], 3), dtype=cp.float32)
+        assert xyz_gpu.flags.c_contiguous
         sz_block = 32, 32
         sz_grid = math.ceil(self.sz[1] / sz_block[1]), math.ceil(self.sz[0] / sz_block[0])
         # call the kernel
@@ -110,30 +109,30 @@ class UCMTestCase(TestCase):
             block=sz_block,
             grid=sz_grid,
             args=(
-                xyz_gpu.data_ptr(),
+                xyz_gpu,
             )
         )
         # download the result
-        xyz_t = xyz_gpu.cpu().numpy() # xyz[h, w, 3]
+        xyz_t = xyz_gpu.get() # xyz[h, w, 3]
         xyz = xyz_t.transpose(2, 0, 1).reshape(3, -1)
         # evaluate error
         err = np.abs(xyz - xyz_ref)
         assert np.max(err) < self.eps
 
-        xy_gpu = torch.zeros((self.sz[0], self.sz[1], 2), dtype=torch.float32, device='cuda')
-        assert xy_gpu.is_contiguous()
+        xy_gpu = cp.zeros((self.sz[0], self.sz[1], 2), dtype=cp.float32)
+        assert xy_gpu.flags.c_contiguous
         # call the kernel
         test_project_gpufunc = self.module.get_function("projectTest")
         test_project_gpufunc(
             block=sz_block,
             grid=sz_grid,
             args=(
-                xyz_gpu.data_ptr(),
-                xy_gpu.data_ptr(),
+                xyz_gpu,
+                xy_gpu,
             )
         )
         # download the result
-        xy_t = xy_gpu.cpu().numpy() # xy[h, w, 2]
+        xy_t = xy_gpu.get() # xy[h, w, 2]
         xy = xy_t.transpose(2, 0, 1)
         # evaluate error
         err = np.abs(xy - xy_ref)
@@ -179,8 +178,8 @@ class UCMTestCase(TestCase):
         planes_gpu = cp.ndarray(vplanes.shape, cp.float32, planes_ptr)
         planes_gpu[:] = cp.array(vplanes)
 
-        xy_gpu = torch.zeros((self.num_planes, self.sz[0], self.sz[1], 2), dtype=torch.float32, device='cuda')
-        assert xy_gpu.is_contiguous()
+        xy_gpu = cp.zeros((self.num_planes, self.sz[0], self.sz[1], 2), dtype=cp.float32)
+        assert xy_gpu.flags.c_contiguous
         sz_block = 64, 16
         sz_grid = math.ceil((self.sz[0] * self.sz[1]) / sz_block[0]), math.ceil(self.num_planes / sz_block[1])
         # call the kernel
@@ -189,11 +188,11 @@ class UCMTestCase(TestCase):
             block=sz_block,
             grid=sz_grid,
             args=(
-                xy_gpu.data_ptr(),
+                xy_gpu,
             )
         )
         # download the result
-        xy_t = xy_gpu.cpu().numpy() # xy[p, h, w, 2]
+        xy_t = xy_gpu.get() # xy[p, h, w, 2]
         xy = xy_t.transpose(0, 3, 1, 2)
         # evaluate error
         err = np.abs(xy - np.array(xy_ref))
@@ -256,17 +255,17 @@ class DepthEstimationTestCase(TestCase):
         planes_has_neighbor_gpu = cp.ndarray(ps.planes_has_neighbor.shape, cp.bool, planes_has_neighbor_ptr)
         planes_has_neighbor_gpu[:] = cp.array(ps.planes_has_neighbor)
 
-        D_gpu = torch.zeros((self.sz[0], self.sz[1]), dtype=torch.float32, device='cuda')
-        assert D_gpu.is_contiguous()
+        D_gpu = cp.zeros((self.sz[0], self.sz[1]), dtype=cp.float32)
+        assert D_gpu.flags.c_contiguous
         sz_block = 32, 32
         sz_grid = math.ceil(self.sz[1] / sz_block[1]), math.ceil(self.sz[0] / sz_block[0])
 
         # upload indices
-        indices_gpu = torch.tensor(indices, device=torch.device('cuda'))
-        assert indices_gpu.is_contiguous()
+        indices_gpu = cp.asarray(indices)
+        assert indices_gpu.flags.c_contiguous
         rays_t = ps.rays.reshape(3, *self.sz)
-        rays_gpu = torch.tensor(rays_t.transpose(1, 2, 0), device=torch.device('cuda')).contiguous()
-        assert rays_gpu.is_contiguous()
+        rays_gpu = cp.ascontiguousarray(cp.asarray(rays_t.transpose(1, 2, 0)))
+        assert rays_gpu.flags.c_contiguous
 
         # call the kernel
         test_depth_gpufunc = self.module.get_function("getDepthTest")
@@ -274,20 +273,20 @@ class DepthEstimationTestCase(TestCase):
             block=sz_block,
             grid=sz_grid,
             args=(
-                rays_gpu.data_ptr(),
-                indices_gpu.data_ptr(),
-                D_gpu.data_ptr(),
+                rays_gpu,
+                indices_gpu,
+                D_gpu,
             )
         )
         ps.sub_pixel_enabled = False
         D_ref = ps.get_depth_from_planes(indices)
-        D = D_gpu.to('cpu').numpy()
+        D = D_gpu.get()
         err = np.abs(D - D_ref)
         assert np.max(err) < self.eps
 
         # upload CV
-        CV_gpu = torch.tensor(ps.CV.transpose(2, 0, 1), device=torch.device('cuda')).contiguous()
-        assert CV_gpu.is_contiguous()
+        CV_gpu = cp.ascontiguousarray(cp.asarray(ps.CV.transpose(2, 0, 1)))
+        assert CV_gpu.flags.c_contiguous
 
         # call the kernel
         test_depth_gpufunc = self.module.get_function("getDepthWithSubpixelDirectTest")
@@ -295,16 +294,16 @@ class DepthEstimationTestCase(TestCase):
             block=sz_block,
             grid=sz_grid,
             args=(
-                rays_gpu.data_ptr(),
-                indices_gpu.data_ptr(),
-                CV_gpu.data_ptr(),
-                D_gpu.data_ptr(),
+                rays_gpu,
+                indices_gpu,
+                CV_gpu,
+                D_gpu,
             )
         )
         ps.sub_pixel_enabled = True
         ps.sub_pixel_interpolation_mode = ps.sub_pixel_interpolation_mode_['direct']
         D_ref = ps.get_depth_from_planes(indices)
-        D = D_gpu.to('cpu').numpy()
+        D = D_gpu.get()
         err = np.abs(D - D_ref)
         assert np.max(err) < self.eps
 
@@ -314,15 +313,15 @@ class DepthEstimationTestCase(TestCase):
             block=sz_block,
             grid=sz_grid,
             args=(
-                rays_gpu.data_ptr(),
-                indices_gpu.data_ptr(),
-                CV_gpu.data_ptr(),
-                D_gpu.data_ptr(),
+                rays_gpu,
+                indices_gpu,
+                CV_gpu,
+                D_gpu,
             )
         )
         ps.sub_pixel_enabled = True
         ps.sub_pixel_interpolation_mode = ps.sub_pixel_interpolation_mode_['inverse']
         D_ref = ps.get_depth_from_planes(indices)
-        D = D_gpu.to('cpu').numpy()
+        D = D_gpu.get()
         err = np.abs(D - D_ref)
         assert np.max(err) < self.eps

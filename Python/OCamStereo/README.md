@@ -3,7 +3,11 @@
 OcamStereo is full GPU implementation based on the PSL-Python.
 
 ## Result of plane sweep motion stereo
+The input image, the estimated depth map and the ground truth with the turbo colormap.
+
 <img src="imgs/vfr_fisheye_0001.png" width="320px"/><img src="imgs/vfr_fisheye_0001_depth.png" width="320px"/><img src="imgs/vfr_fisheye_0001_depth_gt.png" width="320px"/>
+
+<img src="imgs/vfr_fisheye_depth.webp" width="960px"/>
 
 ## Requirements
 ***OcamStereo*** requires the following libraries:

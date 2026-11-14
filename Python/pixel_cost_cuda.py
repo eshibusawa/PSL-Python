@@ -22,12 +22,12 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import torch
-import kornia.filters
+import cupy as cp
+from cupyx.scipy.ndimage import uniform_filter
 
 def box_blur(x, kernel_size, normalized):
-    # kornia.filters.box_blur always normalizes, so scale by the window area to get the sum
-    y = kornia.filters.box_blur(x, kernel_size, border_type='replicate')
+    # filters the last two axes with the replicated border, and scales by the window area to get the sum
+    y = uniform_filter(x, (1,) * (x.ndim - 2) + tuple(kernel_size), mode='nearest')
     return y if normalized else y * (kernel_size[0] * kernel_size[1])
 
 class absolute_difference():
@@ -36,21 +36,21 @@ class absolute_difference():
         self.use_batch = use_batch
         self.kernel_size = kernel_size
         self.box_filter_enabled = box_filter_enabled
-        self.precision = torch.float16
+        self.precision = cp.float16
         self.box_filter = (lambda x: box_blur(x, self.kernel_size, False))
 
     def get_cost_volume(self, warped_images):
         if self.use_batch:
-            ad = torch.abs(self.img_ref.to(self.precision) - warped_images)
+            ad = cp.abs(self.img_ref.astype(self.precision) - warped_images)
             if self.box_filter_enabled:
-                CV = torch.mean(self.box_filter(ad), dim = 0)
+                CV = cp.mean(self.box_filter(ad), axis = 0)
             else:
-                CV = torch.mean(ad, dim = 0)
+                CV = cp.mean(ad, axis = 0)
         else:
             sad = None
             scale = 1.0 / warped_images.shape[0]
             for warped_image in warped_images:
-                ad = torch.abs(self.img_ref.to(self.precision) - warped_image)
+                ad = cp.abs(self.img_ref.astype(self.precision) - warped_image)
                 if self.box_filter_enabled:
                     ad = self.box_filter(ad[None, :])[0, :]
                 if sad is None:
@@ -60,7 +60,7 @@ class absolute_difference():
             CV = sad * scale
             del sad
         del ad
-        torch.cuda.empty_cache()
+        cp.get_default_memory_pool().free_all_blocks()
         return CV
 
 class zero_mean_absolute_difference():
@@ -68,27 +68,27 @@ class zero_mean_absolute_difference():
         self.use_batch = use_batch
         self.kernel_size = kernel_size
         self.box_filter_enabled = box_filter_enabled
-        self.precision = torch.float16
-        self.img_ref = img_ref.to(self.precision)
+        self.precision = cp.float16
+        self.img_ref = img_ref.astype(self.precision)
         self.box_filter = (lambda x, f: box_blur(x, self.kernel_size, f))
         img_ref2 = img_ref[None, None, :]
-        self.img_box = img_ref2 - self.box_filter(img_ref2.to(self.precision), True)
+        self.img_box = img_ref2 - self.box_filter(img_ref2.astype(self.precision), True)
 
     def get_cost_volume(self, warped_images):
         if self.use_batch:
-            warp_box = warped_images - self.box_filter(warped_images.to(self.precision), True)
-            ad = torch.abs(self.img_box - warp_box)
+            warp_box = warped_images - self.box_filter(warped_images.astype(self.precision), True)
+            ad = cp.abs(self.img_box - warp_box)
             if self.box_filter_enabled:
-                CV = torch.mean(self.box_filter(ad), dim = 0)
+                CV = cp.mean(self.box_filter(ad, False), axis = 0)
             else:
-                CV = torch.mean(ad, dim = 0)
+                CV = cp.mean(ad, axis = 0)
         else:
             sad = None
             scale = 1.0 / warped_images.shape[0]
             for warped_image in warped_images:
                 w = warped_image[None, :]
-                warp_box = w - self.box_filter(w.to(self.precision), True)
-                ad = torch.abs(self.img_box - warp_box)
+                warp_box = w - self.box_filter(w.astype(self.precision), True)
+                ad = cp.abs(self.img_box - warp_box)
                 if self.box_filter_enabled:
                     ad = self.box_filter(ad, False)[0, :]
                 if sad is None:
@@ -97,7 +97,7 @@ class zero_mean_absolute_difference():
                     sad += ad
             CV = sad * scale
             del sad, ad, warp_box
-            torch.cuda.empty_cache()
+            cp.get_default_memory_pool().free_all_blocks()
         return CV
 
 class zero_mean_normalized_cross_correlation():
@@ -105,38 +105,38 @@ class zero_mean_normalized_cross_correlation():
         self.kernel_size = kernel_size
         self.use_batch = use_batch
         self.eps = 1E-7
-        self.precision = torch.float32
+        self.precision = cp.float32
         self.box_filter = (lambda x, f: box_blur(x, self.kernel_size, f))
         img_ref2 = img_ref[None, None, :]
-        self.img_box = img_ref2 - self.box_filter(img_ref2.to(self.precision), True)
+        self.img_box = img_ref2 - self.box_filter(img_ref2.astype(self.precision), True)
         self.img_sqr_box = self.box_filter(self.img_box * self.img_box, False)
 
     def get_cost_volume(self, warped_images):
         if self.use_batch:
-            warp_box = warped_images - self.box_filter(warped_images.to(self.precision), True)
+            warp_box = warped_images - self.box_filter(warped_images.astype(self.precision), True)
             warp_sqr_box = self.box_filter(warp_box * warp_box, False)
             cross = warp_box * self.img_box
             nume = self.box_filter(cross, False)
             denom = warp_sqr_box * self.img_sqr_box
-            CV = (1 - torch.mean(nume/(torch.sqrt(denom) + self.eps), dim = 0))/2
+            CV = (1 - cp.mean(nume/(cp.sqrt(denom) + self.eps), axis = 0))/2
         else:
             zncc = None
             scale = 1.0 / warped_images.shape[0]
             for warped_image in warped_images:
                 w = warped_image[None, :]
-                warp_box = w - self.box_filter(w.to(self.precision), True)
+                warp_box = w - self.box_filter(w.astype(self.precision), True)
                 warp_sqr_box = self.box_filter(warp_box * warp_box, False)
                 cross = warp_box * self.img_box
                 nume = self.box_filter(cross, False)
                 denom = warp_sqr_box * self.img_sqr_box
                 if zncc is None:
-                    zncc = (nume/(torch.sqrt(denom) + self.eps))
+                    zncc = (nume/(cp.sqrt(denom) + self.eps))
                 else:
-                    zncc += (nume/(torch.sqrt(denom) + self.eps))
+                    zncc += (nume/(cp.sqrt(denom) + self.eps))
             CV = (1 - (zncc[0] * scale))/2
             del zncc
         del warp_box, warp_sqr_box, cross, nume, denom
-        torch.cuda.empty_cache()
+        cp.get_default_memory_pool().free_all_blocks()
         return CV
 
 class normalized_cross_correlation():
@@ -144,34 +144,34 @@ class normalized_cross_correlation():
         self.kernel_size = kernel_size
         self.use_batch = use_batch
         self.eps = 1E-7
-        self.precision = torch.float32
+        self.precision = cp.float32
         self.box_filter = (lambda x: box_blur(x, self.kernel_size, False))
-        self.img_ref = img_ref.to(self.precision)[None, None, :]
+        self.img_ref = img_ref.astype(self.precision)[None, None, :]
         self.img_sqr_box = self.box_filter(self.img_ref * self.img_ref)
 
     def get_cost_volume(self, warped_images):
         if self.use_batch:
-            w = warped_images.to(self.precision)
+            w = warped_images.astype(self.precision)
             warp_sqr_box = self.box_filter(w * w)
             cross = w * self.img_ref
             nume = self.box_filter(cross)
             denom = warp_sqr_box * self.img_sqr_box
-            CV = (1 - torch.mean(nume/(torch.sqrt(denom) + self.eps), dim = 0))/2
+            CV = (1 - cp.mean(nume/(cp.sqrt(denom) + self.eps), axis = 0))/2
         else:
             zncc = None
             scale = 1.0 / warped_images.shape[0]
             for warped_image in warped_images:
-                w = warped_image.to(self.precision)[None, :]
+                w = warped_image.astype(self.precision)[None, :]
                 warp_sqr_box = self.box_filter(w * w)
                 cross = w * self.img_ref
                 nume = self.box_filter(cross)
                 denom = warp_sqr_box * self.img_sqr_box
                 if zncc is None:
-                    zncc = (nume/(torch.sqrt(denom) + self.eps))
+                    zncc = (nume/(cp.sqrt(denom) + self.eps))
                 else:
-                    zncc += (nume/(torch.sqrt(denom) + self.eps))
+                    zncc += (nume/(cp.sqrt(denom) + self.eps))
             CV = (1 - (zncc[0] * scale))/2
             del zncc
         del w, warp_sqr_box, cross, nume, denom
-        torch.cuda.empty_cache()
+        cp.get_default_memory_pool().free_all_blocks()
         return CV

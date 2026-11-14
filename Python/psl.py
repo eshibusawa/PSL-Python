@@ -26,7 +26,6 @@ import os
 import math
 import numpy as np
 import cv2
-import cupy as cp
 
 from pixel_cost import absolute_difference as ad_cost
 from pixel_cost import zero_mean_normalized_cross_correlation as zncc_cost
@@ -64,15 +63,12 @@ class plane_sweep():
 
     @staticmethod
     def generate_depth(near, far, num, mode):
+        # np.arange may return one more element because of the rounding error of the step, so use np.linspace
         if mode == 1:
-            minD = 1/far
-            maxD = 1/near
-            dstep = (maxD - minD)/(num - 1)
-            depth = 1 / (np.arange(maxD, minD - dstep, -dstep))
+            depth = 1 / np.linspace(1/near, 1/far, num)
         else:
-            step = (far - near)/(num - 1)
-            depth  = np.arange(near, far + step, step)
-        return np.flip(depth)[:num]
+            depth = np.linspace(near, far, num)
+        return np.flip(depth)
 
     def generate_planes(self):
         # front parallel
@@ -115,6 +111,7 @@ class plane_sweep():
         self.Ts = list()
 
     def compile_gpu_module(self):
+        import cupy as cp
         dn = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'ext')
         fnl = list()
         fnl.append(os.path.join(dn, 'unified_camera.cuh'))
@@ -236,7 +233,7 @@ class plane_sweep():
 
     def get_depth(self, ref = 0):
         try:
-            import torch
+            import cupy
         except ImportError:
             self.use_gpu = False
 
@@ -255,7 +252,7 @@ class plane_sweep():
             raise ValueError("Subpixel estimation is not supported!")
 
         try:
-            import torch
+            import cupy as cp
             import texture
             from pixel_cost_cuda import absolute_difference as ad_cost_cuda
             from pixel_cost_cuda import zero_mean_normalized_cross_correlation as zncc_cost_cuda
@@ -274,12 +271,12 @@ class plane_sweep():
         if str(self.cams[ref].__class__.__name__) == 'unified_camera':
             # unified camera model has xi parameters
             Ks = [np.array([C.K[0, 0], C.K[1, 1], C.K[0, 2], C.K[1, 2], C.xi])  for C in self.cams]
-            t_Ks = torch.tensor(np.array(Ks), dtype=torch.float32, device=torch.device('cuda'))
+            t_Ks = cp.asarray(np.array(Ks), dtype=cp.float32)
 
-        t_imgs = torch.tensor(np.array(self.imgs), device=torch.device('cuda'))
-        t_Ps = torch.tensor(self.planes.T, dtype=torch.float32, device=torch.device('cuda')).contiguous()
-        t_Rs = torch.tensor(np.array(self.Rs), dtype=torch.float32, device=torch.device('cuda'))
-        t_Ts = torch.tensor(np.array(self.Ts), dtype=torch.float32, device=torch.device('cuda'))
+        t_imgs = cp.asarray(np.array(self.imgs))
+        t_Ps = cp.asarray(np.ascontiguousarray(self.planes.T), dtype=cp.float32)
+        t_Rs = cp.asarray(np.array(self.Rs), dtype=cp.float32)
+        t_Ts = cp.asarray(np.array(self.Ts), dtype=cp.float32)
 
         # cost function
         if self.matching_costs == 1:
@@ -296,7 +293,7 @@ class plane_sweep():
                                 self.box_filer_ad_enabled, self.matching_gpu_batch_enabled)
 
         # compute warped images
-        rays_gpu = torch.empty((t_imgs[ref].shape[0], t_imgs[ref].shape[1], 3), dtype=torch.float32, device=torch.device('cuda'))
+        rays_gpu = cp.empty((t_imgs[ref].shape[0], t_imgs[ref].shape[1], 3), dtype=cp.float32)
         gpu_func = self.gpu_module.get_function('getRaysKernelUnifiedCameraModel')
         sz_block = 32, 32
         sz_grid = math.ceil(self.imgs[ref].shape[1] / sz_block[1]), math.ceil(self.imgs[ref].shape[0] / sz_block[0])
@@ -304,16 +301,16 @@ class plane_sweep():
             block=sz_block,
             grid=sz_grid,
             args=(
-                rays_gpu.data_ptr(),
-                t_Ks[ref].data_ptr(),
+                rays_gpu,
+                t_Ks[ref],
                 self.imgs[ref].shape[0],
                 self.imgs[ref].shape[1]
             )
         )
         cp.cuda.runtime.deviceSynchronize()
 
-        warped_images_gpu = torch.empty((n_imgs - 1, t_Ps.shape[0], t_imgs[ref].shape[0], t_imgs[ref].shape[1]), dtype=torch.uint8, device=torch.device('cuda'))
-        t_Hs = torch.empty((t_Ps.shape[0], 9), dtype=torch.float32, device=torch.device('cuda'))
+        warped_images_gpu = cp.empty((n_imgs - 1, t_Ps.shape[0], t_imgs[ref].shape[0], t_imgs[ref].shape[1]), dtype=cp.uint8)
+        t_Hs = cp.empty((t_Ps.shape[0], 9), dtype=cp.float32)
         k2 = 0
         for k in range(n_imgs):
             if k == ref:
@@ -326,18 +323,18 @@ class plane_sweep():
                 block=sz_block,
                 grid=sz_grid,
                 args=(
-                    t_Hs.data_ptr(),
-                    t_Rs[ref].data_ptr(),
-                    t_Rs[k].data_ptr(),
-                    t_Ts[ref].data_ptr(),
-                    t_Ts[k].data_ptr(),
-                    t_Ps.data_ptr(),
+                    t_Hs,
+                    t_Rs[ref],
+                    t_Rs[k],
+                    t_Ts[ref],
+                    t_Ts[k],
+                    t_Ps,
                     t_Ps.shape[0]
                 )
             )
             cp.cuda.runtime.deviceSynchronize()
 
-            to_other = texture.create_texture_object(cp.asarray(t_imgs[k]),
+            to_other = texture.create_texture_object(t_imgs[k],
                 addressMode = cp.cuda.runtime.cudaAddressModeBorder,
                 filterMode = cp.cuda.runtime.cudaFilterModeLinear,
                 readMode = cp.cuda.runtime.cudaReadModeNormalizedFloat)
@@ -349,11 +346,11 @@ class plane_sweep():
                 block=sz_block,
                 grid=sz_grid,
                 args=(
-                    warped_images_gpu[k2].data_ptr(),
+                    warped_images_gpu[k2],
                     to_other,
-                    rays_gpu.data_ptr(),
-                    t_Ks[k].data_ptr(),
-                    t_Hs.data_ptr(),
+                    rays_gpu,
+                    t_Ks[k],
+                    t_Hs,
                     t_imgs[ref].shape[0],
                     t_imgs[ref].shape[1],
                     t_Ps.shape[0]
@@ -363,7 +360,7 @@ class plane_sweep():
             k2 += 1
 
         if self.write_debug_warping_enabled:
-            warped_images = warped_images_gpu.to('cpu').numpy()
+            warped_images = warped_images_gpu.get()
             for k in range(0, n_imgs - 1):
                 for l in range(0, self.planes.shape[1]):
                     cv2.imwrite('debug_warping_{:04d}_{:04d}.png'.format(k, l), warped_images[k, l])
@@ -371,11 +368,11 @@ class plane_sweep():
         # compute cost volume
         CV = cost_function.get_cost_volume(warped_images_gpu)
         del warped_images_gpu
-        torch.cuda.empty_cache()
+        cp.get_default_memory_pool().free_all_blocks()
 
         # WTA
-        indices_gpu = torch.argmin(CV, dim = 0)
-        D_gpu = torch.empty((t_imgs[ref].shape[0], t_imgs[ref].shape[1]), dtype=torch.float32, device=torch.device('cuda'))
+        indices_gpu = cp.argmin(CV, axis = 0)
+        D_gpu = cp.empty((t_imgs[ref].shape[0], t_imgs[ref].shape[1]), dtype=cp.float32)
         gpu_func = self.gpu_module.get_function('getDepthKernel')
         sz_block = 32, 32
         sz_grid = math.ceil(self.imgs[ref].shape[1] / sz_block[1]), math.ceil(self.imgs[ref].shape[0] / sz_block[0])
@@ -383,22 +380,22 @@ class plane_sweep():
             block=sz_block,
             grid=sz_grid,
             args=(
-                D_gpu.data_ptr(),
-                rays_gpu.data_ptr(),
-                indices_gpu.data_ptr(),
-                t_Ps.data_ptr(),
+                D_gpu,
+                rays_gpu,
+                indices_gpu,
+                t_Ps,
                 self.imgs[ref].shape[0],
                 self.imgs[ref].shape[1]
             )
         )
         cp.cuda.runtime.deviceSynchronize()
-        D = D_gpu.to('cpu').numpy()
+        D = D_gpu.get()
 
         if self.ouput_cost_volume_enabled:
-            self.CV = CV.to('cpu').numpy().transpose(1, 2, 0)
+            self.CV = CV.get().transpose(1, 2, 0)
 
         del CV, rays_gpu, indices_gpu, D_gpu
         del t_imgs, t_Ps
-        torch.cuda.empty_cache()
+        cp.get_default_memory_pool().free_all_blocks()
 
         return D

@@ -23,6 +23,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import numpy as np
+import cv2
 
 colormap_raw = np.array([
 [0.0, 0.0, 0.5156],
@@ -282,11 +283,13 @@ colormap_raw = np.array([
 [0.5156, 0.0, 0.0],
 [0.5, 0.0, 0.0]])
 colormap = np.fliplr(colormap_raw)
+# Turbo (https://research.google/blog/turbo-an-improved-rainbow-colormap-for-visualization/) in the same order as colormap (BGR)
+colormap_turbo = cv2.applyColorMap(np.arange(256, dtype=np.uint8).reshape(256, 1), cv2.COLORMAP_TURBO)[:, 0, :] / 255
 
-def depth_to_colormap(depth, min_z, max_z):
+def depth_to_colormap(depth, min_z, max_z, cmap=colormap):
     mask = depth > 0
     delta = 1/min_z - 1/max_z
     index = np.round(np.maximum(0, np.minimum(1/(depth + 1E-6) - 1/max_z, delta) / delta) * 255).astype(int)
-    img = (colormap[index] * 255).astype(np.uint8)
+    img = (cmap[index] * 255).astype(np.uint8)
     img[~mask] = (0,0,0)
     return img
